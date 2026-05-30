@@ -53,7 +53,7 @@ _THINK_BLOCK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
 
 def _format_choices(choices) -> str:
     if not choices:
-        return "(선지 정보 없음)"
+        return "(no option information)"
     lines = []
     for i, choice in enumerate(list(choices)[: len(_LETTERS)]):
         lines.append(f"{_LETTERS[i]}. {choice}")
@@ -85,43 +85,49 @@ def _call_judge_with_model(client, model: str, prompt: str, temperature: float, 
     return resp.choices[0].message.content
 
 
-_CF_RUBRIC = """너는 엄격한 의료시험 추론 감사관이다. 문제, 선지 전체, 평가 대상 선지(target),
-그리고 추론(CoT)이 주어진다. 네 임무는 두 단계다.
+_CF_RUBRIC = """You are a medical exam reasoning auditor. You do NOT know which option is the
+official answer. The target option is merely a 'hypothesis to be verified'; never
+judge whether the target is medically correct. You assess ONLY 'how strongly the
+given reasoning (CoT) supports the target as an argument'.
 
-[1단계 — 본문이 실제로 지지하는 선지 판정]
-- CoT 본문의 *임상적 내용*(기전·해부·약리·감별 배제)만 보고, 이 추론이
-  실제로 도달하는 선지 하나를 골라라. 이것을 supported_letter 라 한다.
-- 맨 끝의 "정답: X" 선언 줄은 무시하라. 그 줄은 본문과 무관하게 붙어 있을 수 있다.
-  반드시 본문 논증이 가리키는 선지로 판정하라.
-  (예: 본문이 '좌측와위로 눕힌다'를 논증하면, 끝에 '정답: C'라 적혀 있어도
-   좌측와위에 해당하는 선지가 supported_letter 다.)
+[Step 1 — Determine supported_letter (anti label-cheating)]
+- Looking ONLY at the *clinical content* of the CoT body (mechanism, anatomy,
+  pharmacology, differential exclusion), pick the single option that the reasoning
+  actually arrives at = supported_letter.
+- Ignore the final "Answer: X" declaration line. Judge solely by the option that
+  the body's argument points to.
 
-[2단계 — target 지지 강도 채점]
-- target 선지가 의학적으로 옳은 답인지 여부는 절대 판단하지 마라.
-  오직 '추론이 target 선지의 내용을 결정적으로 지지하는가'만 본다.
-- supported_letter ≠ target 이면: 이 추론은 target을 정당화하지 못한 것이다.
-  prose가 아무리 유창하고 의학적으로 옳아도 score = 1.
-- supported_letter == target 일 때만 아래 기준으로 채점:
-    5 = target에 대한 결정적 임상 근거 + 모든 distractor 명시적 배제
-    4 = target에 대한 강한 정당화 + 주요 distractor 배제
-    3 = 합리적 정당화는 있으나 distractor 배제가 약하거나 일반적
-    2 = 결론은 명시했으나 임상 근거가 빈약(재진술 수준)
-    1 = target 정당화가 사실상 실패
+[Step 2 — Score target support strength]
+- If supported_letter != target: no matter how fluent/accurate the prose is,
+  force score = 1.
+- ONLY when supported_letter == target, judge whether each of the 4 criteria below
+  is met:
+    (a) Did it explicitly present the core clinical mechanism/evidence for the target?
+    (b) Is that evidence *specific* to the target (not a generality/restatement that
+        applies equally to other options)?
+    (c) Did it exclude at least 1 distractor with concrete evidence?
+    (d) Did it exclude all major distractors without omission?
+  Force the score by the number of criteria met (do not flee to the median):
+    5 = (a)(b)(c)(d) all met
+    4 = (a)(b)(c) met, (d) partially missing
+    3 = only (a)(b) met (no exclusion), or only (a)(c)
+    2 = only (a) met — evidence is generality/restatement level, no target specificity
+    1 = (a) also fails — essentially no evidence for the target
 
 [Input]
-문제:
+Question:
 {question}
 
-선지 전체:
+All options:
 {choices}
 
-평가 대상 선지(target): {target_letter}
+Option to verify (target): {target_letter}
 
 CoT:
 {cot}
 
-오직 아래 JSON만 출력하라. 다른 텍스트·코드블록·서두 금지:
-{{"supported_letter": "<A~E>", "matches_target": <true|false>, "score": <1~5>, "reason": "<한 문장>"}}
+Output ONLY the JSON below. No other text, code block, or preamble:
+{{"supported_letter": "<A~E>", "matches_target": <true|false>, "score": <1~5>, "reason": "<one sentence>"}}
 """
 
 

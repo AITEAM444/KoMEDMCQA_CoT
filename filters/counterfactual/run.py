@@ -57,8 +57,7 @@ from filters.base import BaseFilter
 from utils.schema import CoTSample
 
 
-# hedge 신호 헬퍼 (구 filters.think_final_divergence 에서 inline — counterfactual 전용).
-# R1 의 망설임/번복 표지. 사후합리화 판정의 보조 신호(hedge_gap)에 쓰인다.
+# 한국어 hedge 표지 + 카운터 (구 filters.think_final_divergence 에서 inline — counterfactual 전용).
 _KO_HEDGE_PATTERNS: list[str] = [
     "하지만", "그러나", "다시 생각", "확실하지", "정정",
     "아닌 것 같", "다른 것 같", "혹시", "잠깐", "재고",
@@ -73,15 +72,52 @@ def _count_hedges(text: str, patterns: list[str]) -> int:
     return sum(text_lower.count(p) for p in patterns)
 
 
-def _hedge_rate_per_100words(text: str, patterns: list[str]) -> float:
-    words = text.split()
-    return _count_hedges(text, patterns) / max(len(words), 1) * 100
-
-
 # R1 이 "다시 생각해보자", "확실하지 않다" 같은 망설임을 *실제로 쓰는 위치는 <think> 블록*
 # 이다. 정형 4-step 출력은 이미 결론 정리된 깔끔한 글이라 hedge 가 거의 나오지 않는다.
 # 따라서 hedge 신호는 think 블록에서 측정해야 의미가 있다 (formal 출력만 보면 신호 누락).
 _THINK_BLOCK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
+
+
+# R1 의 내부추론(<think>)이 한국어/영어가 섞여 나오므로 hedge 표지도 양쪽을 본다.
+# 영어 단어형 표지("but", "wait" 등)는 단어 경계로 매칭해 "distribute", "button"
+# 같은 부분 문자열 오탐을 막고, 구(phrase)형 표지는 그대로 substring 매칭한다.
+# 한국어 표지는 기존 _KO_HEDGE_PATTERNS 를 substring 매칭(_count_hedges)으로 사용한다.
+_EN_HEDGE_PATTERNS: list[str] = [
+    # single-word markers (matched on word boundaries)
+    "but", "however", "wait", "actually", "reconsider", "rethink",
+    "uncertain", "maybe", "perhaps", "rather", "recheck", "reexamine",
+    "incorrect", "wrong", "mistake", "mistaken", "correction", "hmm", "though",
+    # phrase markers (matched as substrings; avoid phrases whose trigger word is
+    # already a single-word marker above, to prevent double counting)
+    "not sure", "on second thought", "double-check", "double check",
+    "re-check", "re-examine", "on the other hand", "does not seem",
+    "doesn't seem", "is not right", "isn't right", "not right",
+    "second-guess", "second guess",
+]
+# 단어 경계 매칭 대상(공백/하이픈 없는 단일 토큰)과 substring 대상을 미리 분리한다.
+_EN_HEDGE_WORDS = [p for p in _EN_HEDGE_PATTERNS if " " not in p and "-" not in p]
+_EN_HEDGE_PHRASES = [p for p in _EN_HEDGE_PATTERNS if " " in p or "-" in p]
+_EN_HEDGE_WORD_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(w) for w in _EN_HEDGE_WORDS) + r")\b"
+)
+
+
+def _count_en_hedges(text: str) -> int:
+    """영어 hedge 표지 수 — 단일 단어는 단어 경계, 구는 substring 매칭."""
+    text_lower = text.lower()
+    count = len(_EN_HEDGE_WORD_RE.findall(text_lower))
+    count += sum(text_lower.count(p) for p in _EN_HEDGE_PHRASES)
+    return count
+
+
+def _mixed_hedge_rate_per_100words(text: str) -> float:
+    """한국어 + 영어 hedge 표지를 합산한 100단어당 hedge rate."""
+    if not text:
+        return 0.0
+    words = text.split()
+    ko = _count_hedges(text, _KO_HEDGE_PATTERNS)
+    en = _count_en_hedges(text)
+    return (ko + en) / max(len(words), 1) * 100
 
 
 def _extract_think(text: str) -> str:
@@ -112,12 +148,12 @@ def _compute_hedge_signals(orig_cot: str, cfs: list[dict]) -> dict:
       - 음수 큼: CF 가 hedge 폭증 (R1 이 wrong 답을 옹호하느라 망설임 = robust 의심)
     """
     orig_think = _extract_think(orig_cot)
-    orig_hedge = _hedge_rate_per_100words(orig_think, _KO_HEDGE_PATTERNS)
+    orig_hedge = _mixed_hedge_rate_per_100words(orig_think)
 
     cf_hedge_records = []
     for c in cfs:
         cf_think = _extract_think(c.get("cf_cot") or "")
-        cf_hedge = _hedge_rate_per_100words(cf_think, _KO_HEDGE_PATTERNS) if cf_think else None
+        cf_hedge = _mixed_hedge_rate_per_100words(cf_think) if cf_think else None
         cf_hedge_records.append({
             "target_letter": c.get("target_letter"),
             "cf_hedge_rate": round(cf_hedge, 4) if cf_hedge is not None else None,
