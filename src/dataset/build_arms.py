@@ -2,30 +2,38 @@
 build_arms — 통합 데이터셋(스펙 §7) 빌드 + arm 별 SFT export.
 
 서브커맨드:
-  unified  generate_traces 출력(jsonl) → 통합 레코드(필터 플래그 + 신호) jsonl.
-           KorMedMCQA 에서 질문·선지·gold join, C1(①~④) 판정해 filters.C1 채움.
-           C2/C3 는 judge_general / counterfactual 결과로 나중에 채운다(여기선 null).
-  export   통합 레코드 → arm(C0/C1/C2/C3/C-rand) 슬라이스 → SFT messages
-           (user=질문+선지, assistant=reasoning_content + "정답: X").
+  unified    generate_traces 출력(jsonl) → 통합 레코드(필터 플래그 + 신호) jsonl.
+             KorMedMCQA 에서 질문·선지·gold join, C1(①~④) 판정해 filters.C1 채움.
+             C2/C3/C-rand 는 나중 단계(judge_general / counterfactual / 랜덤)에서 채운다.
+  merge-c3   채점된 counterfactual 파일(metadata.counterfactual) → CounterfactualFilter 적용
+             → filters.C3 = (C1 통과 AND counterfactual 통과) 채움. (run.py 로직 재사용)
+  make-crand C3 의 수량 통제군. C1 통과 풀에서 시드 고정 랜덤 |C3|개 → filters."C-rand"=True.
+             merge-c3 다음에 실행해야 |C3| 가 정해진다.
+  export     통합 레코드 → arm(C0/C1/C2/C3/C-rand) 슬라이스 → SFT messages
+             (user=질문+선지, assistant=reasoning_content + "정답: X").
 
 스키마(§7): {id, subject, question, choices, gold, think, final_answer, tokens,
-            en_ratio, filters:{C0,C1,C2,C3}, signals:{...}}
+            en_ratio, filters:{C0,C1,C2,C3,C-rand}, signals:{...}}
 
 사용:
-  python src/dataset/build_arms.py unified --input data/train_cot_fewshot.jsonl --output data/unified.jsonl
-  python src/dataset/build_arms.py export  --input data/unified.jsonl --arm C1 --output data/train_C1.jsonl
+  python src/dataset/build_arms.py unified    --input data/train_cot_fewshot.jsonl --output data/unified.jsonl
+  python src/dataset/build_arms.py merge-c3   --unified data/unified.jsonl --cf data/cf_judged.json --output data/unified.jsonl
+  python src/dataset/build_arms.py make-crand --unified data/unified.jsonl --output data/unified.jsonl --seed 42
+  python src/dataset/build_arms.py export     --input data/unified.jsonl --arm C1 --output data/train_C1.jsonl
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import random
 import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from src.filters import standard as S  # noqa: E402
+from utils.data_loader import load_samples  # noqa: E402
 
 SUBSETS = ["doctor", "nurse", "pharm", "dentist"]
 CHOICE_KEYS = ["A", "B", "C", "D", "E"]
@@ -107,6 +115,114 @@ def cmd_unified(args):
           f"평균 tokens={sum(o['tokens'] for o in out)//max(n,1)}")
 
 
+def _read_unified(path):
+    return [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
+
+
+def _write_unified(rows, path):
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        for r in rows:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+
+def _cf_id(sample) -> str | None:
+    """채점 파일의 CoTSample → unified id (subset_sampleidx).
+
+    실제 파이프라인의 regen 파일은 metadata.sample_idx(per-subset)를 가지며 이게
+    generate_traces→unified 의 id 규약과 일치한다. 구 pilot 파일처럼 sample_idx 가
+    없으면 top-level id 로 폴백한다((subset,id) 유일 보장 시에만 유효).
+    """
+    if not sample.subset:
+        return None
+    sidx = (sample.metadata or {}).get("sample_idx")
+    if sidx is None:
+        sidx = sample.id
+    try:
+        return f"{sample.subset}_{int(sidx):04d}"
+    except (TypeError, ValueError):
+        return None
+
+
+def cmd_merge_c3(args):
+    """채점된 counterfactual 파일에 CounterfactualFilter 를 적용해 filters.C3 채움.
+
+    C3 = C1 통과 AND counterfactual 통과. run.py 의 판정 로직을 그대로 재사용한다
+    (gap/hedge/min_orig_score + on_missing 정책은 pipeline_config.yaml 에서 읽음).
+    채점 파일에 없는 샘플의 C3 는 None(판정 보류) — cf 채점이 아직 안 된 샘플.
+    """
+    from filters.counterfactual.run import CounterfactualFilter
+
+    samples = load_samples(args.cf)
+    cf_seen, no_idx = set(), 0
+    for s in samples:
+        rid = _cf_id(s)
+        if rid is None:
+            no_idx += 1
+            continue
+        cf_seen.add(rid)
+    passed = CounterfactualFilter().run(samples, verbose=True)
+    cf_pass = {rid for s in passed if (rid := _cf_id(s)) is not None}
+
+    rows = _read_unified(args.unified)
+    n_true = n_false = n_none = 0
+    for r in rows:
+        rid = r["id"]
+        c1 = bool(r.get("filters", {}).get("C1"))
+        if not c1:
+            c3 = False                 # C1 탈락 → C3 불가 (C3 ⊆ C1)
+        elif rid in cf_pass:
+            c3 = True
+        elif rid in cf_seen:
+            c3 = False                 # cf 채점됨 + 탈락
+        else:
+            c3 = None                  # cf 채점 안 됨 → 보류
+        r.setdefault("filters", {})["C3"] = c3
+        n_true += c3 is True
+        n_false += c3 is False
+        n_none += c3 is None
+
+    _write_unified(rows, args.output)
+    print(f"[merge-c3] {len(rows)}건 → {args.output}")
+    print(f"  C3: True={n_true}  False={n_false}  None(cf 미채점)={n_none}")
+    print(f"  cf 채점 파일: {len(samples)}건 (sample_idx 없음 {no_idx} 제외, "
+          f"통과 {len(cf_pass)})")
+    if n_none:
+        print(f"  ⚠ {n_none}건은 cf 채점 전 — make-crand 전에 전체 채점 필요 "
+              f"(|C3| 가 과소집계됨)")
+
+
+def cmd_make_crand(args):
+    """C3 수량 통제군: C1 통과 풀에서 시드 고정 랜덤 |C3|개 → filters['C-rand']=True.
+
+    C3 vs C-rand 는 N 이 같고(둘 다 |C3|) 한쪽은 품질 선별·한쪽은 랜덤 — H2 비교용.
+    랜덤 풀은 C1 통과 전체(=C3 모집단). C3 와의 겹침은 랜덤이므로 허용한다.
+    """
+    rows = _read_unified(args.unified)
+    n_c3 = sum(1 for r in rows if r.get("filters", {}).get("C3") is True)
+    n_none = sum(1 for r in rows if r.get("filters", {}).get("C3") is None)
+    pool = [r["id"] for r in rows if r.get("filters", {}).get("C1") is True]
+
+    if n_c3 == 0:
+        print("[make-crand] ⚠ C3=True 가 0건 — merge-c3 를 먼저 실행하세요. 중단.")
+        return
+    if n_none:
+        print(f"[make-crand] ⚠ C3=None {n_none}건 존재 — cf 채점 미완 상태. "
+              f"|C3|={n_c3} 가 과소집계일 수 있음.")
+
+    k = min(n_c3, len(pool))
+    chosen = set(random.Random(args.seed).sample(pool, k))
+    for r in rows:
+        r.setdefault("filters", {})["C-rand"] = r["id"] in chosen
+
+    _write_unified(rows, args.output)
+    print(f"[make-crand] {len(rows)}건 → {args.output}")
+    print(f"  C1 풀={len(pool)}  |C3|={n_c3}  → C-rand={len(chosen)}건 (seed={args.seed})")
+    overlap = sum(1 for r in rows
+                  if r.get("filters", {}).get("C-rand") and r.get("filters", {}).get("C3"))
+    print(f"  C3 와 겹침 {overlap}건 (랜덤이므로 정상)")
+
+
 def cmd_export(args):
     rows = [json.loads(l) for l in open(args.input, encoding="utf-8") if l.strip()]
     arm = args.arm
@@ -145,6 +261,18 @@ def main():
     u.add_argument("--output", required=True)
     u.add_argument("--split", default="train")
     u.set_defaults(func=cmd_unified)
+
+    m = sub.add_parser("merge-c3", help="채점된 counterfactual → filters.C3 채움")
+    m.add_argument("--unified", required=True, help="cmd_unified 출력 jsonl")
+    m.add_argument("--cf", required=True, help="채점된 counterfactual json (metadata.counterfactual)")
+    m.add_argument("--output", required=True)
+    m.set_defaults(func=cmd_merge_c3)
+
+    c = sub.add_parser("make-crand", help="C1 풀에서 랜덤 |C3|개 → C-rand 수량 통제군")
+    c.add_argument("--unified", required=True, help="merge-c3 완료된 unified jsonl")
+    c.add_argument("--output", required=True)
+    c.add_argument("--seed", type=int, default=42)
+    c.set_defaults(func=cmd_make_crand)
 
     e = sub.add_parser("export", help="통합 → arm 슬라이스 → SFT messages")
     e.add_argument("--input", required=True)
