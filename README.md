@@ -15,6 +15,8 @@ student 정확도를 유지·향상시키는 것이 증거.
 
 ```bash
 # 0) 설치 + 키
+python -m venv .venv
+.venv\Scripts\Activate.ps1
 pip install torch transformers datasets openai tqdm langdetect peft
 pip install -U "llamafactory[torch,deepspeed,metrics]"
 export DEEPSEEK_API_KEY=...   # 생성(R1)

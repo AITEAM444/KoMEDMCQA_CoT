@@ -62,19 +62,26 @@ def _make_judge() -> tuple[object, str]:
 # 범용 품질 루브릭 — 답의 옳고 그름이 아니라 *추론 글 자체의 품질* 만 본다.
 # (C3 와 달리 답을 바꿔보지 않는다 = 일반 judge 가 변별 못 함을 보이려는 대조군이므로
 #  의도적으로 표준적인 품질 축만 사용한다.)
-_QUALITY_RUBRIC = """You are an expert grader of medical reasoning. Score the quality of the
-following chain-of-thought (CoT) written for a Korean medical licensing exam question.
-The official answer is {gold_letter}; the CoT reaches this answer. Judge ONLY the
-*quality of the reasoning prose*, on three axes (general writing quality, NOT whether
-you could find a better answer):
+_QUALITY_RUBRIC = """You are a STRICT grader of medical reasoning quality. Most exam explanations
+have real flaws — do NOT be lenient and actively hunt for weaknesses. If you find yourself
+giving 4–5 to most explanations, you are grading too softly. The official answer is
+{gold_letter} and the CoT reaches it; judge ONLY the *reasoning prose quality*, NOT whether
+a better answer exists. Score each of three axes independently on 1–5 with these anchors:
 
-  (1) Coherence      — do the steps connect logically, no leaps or contradictions?
-  (2) Justification  — does it give concrete clinical evidence (mechanism / pharmacology /
-                       anatomy / differential exclusion), not just restate the answer?
-  (3) Clarity        — is it clearly written, well-organized, free of garbled/run-on text?
+(1) justification — concrete, answer-SPECIFIC clinical evidence?
+    5 = decisive mechanism/pharmacology/anatomy AND explicitly excludes the main distractors with evidence
+    4 = solid specific mechanism, but ≥1 relevant distractor left unaddressed
+    3 = correct but GENERIC evidence that could equally support other options; no exclusion
+    2 = mostly restates the answer / shallow assertion
+    1 = no real clinical evidence
+(2) coherence — do steps connect with no leaps, contradictions, or post-hoc jumps?
+    5 = every step strictly follows the previous; 3 = one unjustified leap; 1 = incoherent / hand-wavy
+(3) clarity — organized, precise terminology, free of garbled/run-on/padding?
+    5 = clean and precise; 3 = readable but verbose/loose; 1 = garbled or hard to follow
 
-Give an overall integer score from 1 to 5 (5 = excellent on all three axes,
-1 = incoherent / no justification / unreadable).
+Rules: grade each axis strictly and INDEPENDENTLY. Do NOT default to the middle, and do
+NOT copy one axis onto another. A fluent but generic explanation MUST score low on (1).
+Reserve 5 for genuinely excellent reasoning.
 
 [Question]
 {question}
@@ -82,34 +89,57 @@ Give an overall integer score from 1 to 5 (5 = excellent on all three axes,
 [Options]
 {choices}
 
+[Correct answer]
+{gold_letter}
+
 [CoT reasoning]
 {cot}
 
-Output ONLY this JSON, no other text:
-{{"coherence": <1-5>, "justification": <1-5>, "clarity": <1-5>, "score": <1-5>, "reason": "<one sentence>"}}
+Output ONLY this JSON, no other text (reason = the single biggest weakness):
+{{"justification": <1-5>, "coherence": <1-5>, "clarity": <1-5>, "reason": "<one sentence on the main weakness>"}}
 """
+
+_AXES = ("justification", "coherence", "clarity")
+
+
+def _composite(obj: dict) -> float | None:
+    """세 축(1~5) 평균을 c2_score 로. 세 축이 다 있으면 평균(연속값 → 동점↓ → 랭킹 변별↑),
+    없으면 과거 'score' 단일값으로 폴백."""
+    vals = [obj[a] for a in _AXES if isinstance(obj.get(a), (int, float)) and 1 <= obj[a] <= 5]
+    if len(vals) == len(_AXES):
+        return sum(vals) / len(vals)
+    if isinstance(obj.get("score"), (int, float)) and 1 <= obj["score"] <= 5:
+        return float(obj["score"])
+    return None
 
 
 def _parse_quality(text: str) -> dict | None:
-    """judge 응답에서 {"score":1-5, ...} 추출 (JSON → 정규식 폴백)."""
+    """judge 응답에서 세 축(justification/coherence/clarity) 추출 (JSON → 정규식 폴백)."""
     if not text or not text.strip():
         return None
     t = text.strip()
     if t.startswith("```"):
         t = re.sub(r"^```[a-zA-Z]*\n", "", t)
         t = re.sub(r"\n```$", "", t)
-    for cand in reversed(re.findall(r'\{[^{}]*"score"\s*:\s*[0-9]+[^{}]*\}', t)):
+    for cand in reversed(re.findall(r'\{[^{}]*\}', t)):
         try:
             obj = json.loads(cand)
-            if isinstance(obj.get("score"), (int, float)) and 1 <= obj["score"] <= 5:
-                return obj
         except json.JSONDecodeError:
             continue
-    m = re.findall(r'"score"\s*:\s*([0-9])', t)
+        if isinstance(obj, dict) and _composite(obj) is not None:
+            return obj
+    # 정규식 폴백 — 깨진 JSON 에서 축 점수만 회수
+    obj = {}
+    for a in _AXES:
+        m = re.findall(rf'"{a}"\s*:\s*([1-5])', t)
+        if m:
+            obj[a] = int(m[-1])
+    if len(obj) == len(_AXES):
+        obj["reason"] = "recovered_from_broken_json"
+        return obj
+    m = re.findall(r'"score"\s*:\s*([1-5])', t)
     if m:
-        sc = int(m[-1])
-        if 1 <= sc <= 5:
-            return {"score": sc, "reason": "recovered_from_broken_json"}
+        return {"score": int(m[-1]), "reason": "recovered_from_broken_json"}
     return None
 
 
@@ -124,7 +154,7 @@ def score_quality(
     *, n_reps: int = 1, temperature: float = 0.3, sleep_on_error: float = 2.0,
     max_chars: int = 8000,
 ) -> dict:
-    """단일 CoT 의 범용 품질 점수(1~5). n_reps>1 이면 평균."""
+    """단일 CoT 의 범용 품질 점수(1~5, 세 축 평균). n_reps>1 이면 평균."""
     gold_letter = _LETTERS[gold_idx] if 0 <= gold_idx < len(_LETTERS) else "?"
     prompt = _QUALITY_RUBRIC.format(
         gold_letter=gold_letter,
@@ -161,7 +191,9 @@ def score_quality(
             if sleep_on_error:
                 time.sleep(sleep_on_error)
         if parsed is not None:
-            runs.append(int(parsed["score"]))
+            comp = _composite(parsed)
+            if comp is not None:
+                runs.append(round(comp, 4))
     return {"mean": (sum(runs) / len(runs)) if runs else None, "runs": runs, "last_err": last_err}
 
 
