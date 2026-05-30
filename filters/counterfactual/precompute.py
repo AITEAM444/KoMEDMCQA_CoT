@@ -67,6 +67,289 @@ _LETTERS = ["A", "B", "C", "D", "E"]
 _THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 
 
+def _read_json_records(path: Path) -> list[dict]:
+    with open(path, encoding="utf-8") as f:
+        if path.suffix == ".jsonl":
+            return [json.loads(line) for line in f if line.strip()]
+        data = json.load(f)
+    return data if isinstance(data, list) else [data]
+
+
+def _looks_like_existing_cf_input(path: Path) -> bool:
+    try:
+        rows = _read_json_records(path)
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not rows:
+        return False
+    first = rows[0]
+    return "cf_content" in first or "cf_reasoning_content" in first
+
+
+def _idx_from_letter(letter: str | None) -> int | None:
+    if not letter:
+        return None
+    letter = str(letter).strip().upper()
+    return _LETTERS.index(letter) if letter in _LETTERS else None
+
+
+def _infer_split(path: Path) -> str | None:
+    name = path.name.lower()
+    for split in ("train", "dev", "test", "fewshot"):
+        if split in name:
+            return split
+    return None
+
+
+def _record_key(rec: dict) -> tuple[str, int] | None:
+    subset = rec.get("subset") or rec.get("subject")
+    sample_idx = rec.get("sample_idx")
+    if subset is None or sample_idx is None:
+        return None
+    try:
+        return str(subset), int(sample_idx)
+    except (TypeError, ValueError):
+        return None
+
+
+def _cot_from_record(rec: dict) -> str:
+    cot = rec.get("cot")
+    if cot:
+        return cot
+    reasoning = rec.get("reasoning_content") or rec.get("cf_reasoning_content")
+    final = rec.get("reasoning") or rec.get("final_content") or rec.get("cf_content") or ""
+    if reasoning:
+        return f"<think>{reasoning}</think>\n{final}".strip()
+    return (final or rec.get("think") or "").strip()
+
+
+def _load_original_trace_map(input_path: Path, split: str | None) -> dict[tuple[str, int], dict]:
+    if not split:
+        return {}
+    repo_root = Path(__file__).resolve().parents[2]
+    candidates = [
+        input_path.with_name(f"{split}_cot_fewshot.jsonl"),
+        input_path.parent / "raw" / f"{split}_cot_fewshot.jsonl",
+        input_path.parent.parent / "raw" / f"{split}_cot_fewshot.jsonl",
+        repo_root / "data" / "raw" / f"{split}_cot_fewshot.jsonl",
+        repo_root / "data" / f"{split}_cot_fewshot.jsonl",
+    ]
+    for path in candidates:
+        if not path.exists():
+            continue
+        rows = _read_json_records(path)
+        out = {}
+        for rec in rows:
+            key = _record_key(rec)
+            if key is not None:
+                out[key] = rec
+        print(f"[counterfactual:precompute] 원본 CoT {len(out)}건 로드 ← {path}")
+        return out
+    return {}
+
+
+def _load_unified_ref_map(input_path: Path, split: str | None) -> dict[tuple[str, int], dict]:
+    repo_root = Path(__file__).resolve().parents[2]
+    names = []
+    if split:
+        names.extend([f"{split}_unified.jsonl", f"{split}_unified.json"])
+    if split in (None, "train"):
+        names.extend(["unified.jsonl", "unified.json"])
+    candidates = []
+    for name in names:
+        candidates.extend([
+            input_path.with_name(name),
+            input_path.parent / "filtered" / name,
+            input_path.parent.parent / "filtered" / name,
+            repo_root / "data" / name,
+            repo_root / "data" / "filtered" / name,
+        ])
+    seen = set()
+    for path in candidates:
+        if path in seen or not path.exists():
+            continue
+        seen.add(path)
+        rows = _read_json_records(path)
+        out = {}
+        for rec in rows:
+            rid = rec.get("id", "")
+            if "_" in rid:
+                subset, sidx = rid.rsplit("_", 1)
+                try:
+                    out[(subset, int(sidx))] = rec
+                    continue
+                except ValueError:
+                    pass
+            key = _record_key(rec)
+            if key is not None:
+                out[key] = rec
+        print(f"[counterfactual:precompute] unified 참조 {len(out)}건 로드 ← {path}")
+        return out
+    return {}
+
+
+def _load_kormed_ref_map(split: str | None) -> dict[tuple[str, int], dict]:
+    if not split:
+        return {}
+    try:
+        from datasets import load_dataset
+    except ImportError:
+        return {}
+
+    out = {}
+    for subset in ("doctor", "nurse", "pharm", "dentist"):
+        try:
+            ds = load_dataset("sean0042/KorMedMCQA", subset, split=split)
+        except Exception as e:
+            print(f"[counterfactual:precompute] ⚠ KorMedMCQA {subset}/{split} 참조 로드 실패: {type(e).__name__}: {e}")
+            continue
+        for i, row in enumerate(ds):
+            out[(subset, i)] = {
+                "question": row.get("question", ""),
+                "choices": [row[k] for k in _LETTERS if row.get(k)],
+                "gold": int(row["answer"]) - 1,
+            }
+    if out:
+        print(f"[counterfactual:precompute] KorMedMCQA {split} 참조 {len(out)}건 로드")
+    return out
+
+
+def run_existing_cf(
+    input_path: Path,
+    output_path: Path,
+    limit: int | None,
+    judge_reps: int,
+    judge_temp: float,
+    workers: int = 1,
+) -> None:
+    """counterfactual_adapter.py 가 만든 기존 CF 파일을 채점한다.
+
+    README 의 `precompute --input data/*_cf.jsonl` 경로를 지원하기 위한 모드다.
+    원본 CoT 는 같은 split 의 `*_cot_fewshot.jsonl`, 문항/선지는 unified 파일에서
+    가능한 만큼 보강한다.
+    """
+    cf_rows = _read_json_records(input_path)
+    if limit is not None:
+        cf_rows = cf_rows[:limit]
+
+    split = _infer_split(input_path)
+    original_map = _load_original_trace_map(input_path, split)
+    ref_map = _load_unified_ref_map(input_path, split)
+    if not ref_map:
+        ref_map = _load_kormed_ref_map(split)
+    judge_client, judge_model = _make_judge()
+    print(
+        f"[counterfactual:precompute] existing-cf judge backend = {judge_model}, "
+        f"workers = {workers}, n_samples = {len(cf_rows)}"
+    )
+    if not original_map:
+        print("[counterfactual:precompute] ⚠ 원본 CoT 파일을 못 찾았습니다. orig_score 는 null 로 저장됩니다.")
+    if not ref_map:
+        print("[counterfactual:precompute] ⚠ unified 참조를 못 찾았습니다. 문제/선지 정보가 제한됩니다.")
+
+    def _make_sample_and_result(i: int) -> tuple[int, CoTSample]:
+        rec = cf_rows[i]
+        key = _record_key(rec)
+        subset = (key[0] if key else rec.get("subset") or rec.get("subject") or "")
+        sample_idx = key[1] if key else rec.get("sample_idx", rec.get("global_idx", i))
+        ref = ref_map.get(key, {}) if key else {}
+        orig = original_map.get(key, {}) if key else {}
+
+        gold_idx = _idx_from_letter(rec.get("gold_letter"))
+        if gold_idx is None:
+            gold_idx = int(ref.get("gold", orig.get("answer", 0)))
+            if gold_idx > 4:
+                gold_idx -= 1
+        wrong_idx = _idx_from_letter(rec.get("wrong_letter"))
+        cf_cot = _cot_from_record(rec)
+        orig_cot = _cot_from_record(orig) or (f"<think>{ref.get('think', '')}</think>" if ref.get("think") else "")
+        question = ref.get("question") or orig.get("question") or rec.get("question", "")
+        choices = ref.get("choices") or [rec[k] for k in _LETTERS if rec.get(k)]
+
+        metadata = {
+            "global_idx": rec.get("global_idx"),
+            "sample_idx": sample_idx,
+            "gold_letter": rec.get("gold_letter"),
+            "wrong_letter": rec.get("wrong_letter"),
+        }
+        sample = CoTSample(
+            id=f"{subset}_{int(sample_idx):04d}" if subset != "" else str(rec.get("global_idx", i)),
+            subset=subset,
+            question=question,
+            choices=choices,
+            answer=gold_idx,
+            teacher_model=orig.get("model") or rec.get("model", ""),
+            cot=orig_cot,
+            predicted_answer=_idx_from_letter(orig.get("predicted") or rec.get("predicted")),
+            metadata={k: v for k, v in metadata.items() if v is not None},
+        )
+
+        cfs = []
+        if wrong_idx is None:
+            cfs.append({
+                "target_idx": None,
+                "target_letter": rec.get("wrong_letter"),
+                "cf_cot": cf_cot,
+                "cf_score": None,
+                "judge_runs": [],
+                "regen_model": rec.get("model", ""),
+                "error": "missing_wrong_letter",
+            })
+        else:
+            cf = score_convincingness(
+                judge_client, question, cf_cot, wrong_idx,
+                model=judge_model, n_reps=judge_reps, temperature=judge_temp,
+                choices=choices,
+            )
+            cfs.append({
+                "target_idx": wrong_idx,
+                "target_letter": _LETTERS[wrong_idx],
+                "cf_cot": cf_cot,
+                "cf_score": cf["mean"],
+                "judge_runs": cf["runs"],
+                "regen_model": rec.get("model", ""),
+                "error": None if cf["mean"] is not None else "; ".join(str(e) for e in cf["errors"] if e),
+            })
+
+        if orig_cot:
+            orig_score = score_convincingness(
+                judge_client, question, orig_cot, gold_idx,
+                model=judge_model, n_reps=judge_reps, temperature=judge_temp,
+                choices=choices,
+            )
+            orig_mean, orig_runs = orig_score["mean"], orig_score["runs"]
+        else:
+            orig_mean, orig_runs = None, []
+
+        sample.metadata = {
+            **sample.metadata,
+            "counterfactual": {
+                "k": 1,
+                "orig_target_letter": _LETTERS[gold_idx],
+                "orig_score": orig_mean,
+                "orig_judge_runs": orig_runs,
+                "counterfactuals": cfs,
+            },
+        }
+        return i, sample
+
+    results: dict[int, CoTSample] = {}
+    if workers <= 1:
+        for i in range(len(cf_rows)):
+            idx, sample = _make_sample_and_result(i)
+            results[idx] = sample
+            print(f"[counterfactual:precompute] {len(results)}/{len(cf_rows)} id={sample.id}")
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(_make_sample_and_result, i) for i in range(len(cf_rows))]
+            for fut in as_completed(futures):
+                idx, sample = fut.result()
+                results[idx] = sample
+                print(f"[counterfactual:precompute] {len(results)}/{len(cf_rows)} id={sample.id}")
+
+    save_samples([results[i] for i in range(len(cf_rows))], output_path)
+
+
 # ── Teacher CoT 재생성기 (구 filters/counterfactual/regenerator.py 인라인) ──────────
 # counterfactual 은 forced 모드만 사용한다(정답을 prompt 에 박고 그 정답이 왜 맞는지
 # R1 이 단계별 추론하게 함). MATCHA 전용이던 free 모드는 함께 제거했다.
@@ -272,6 +555,19 @@ def run(
     workers: int = 1,
     regen_only: bool = False,
 ) -> None:
+    if _looks_like_existing_cf_input(input_path):
+        if regen_only:
+            raise ValueError("--regen-only 는 기존 CF 입력(data/*_cf.jsonl)에는 사용할 수 없습니다.")
+        run_existing_cf(
+            input_path=input_path,
+            output_path=output_path,
+            limit=limit,
+            judge_reps=judge_reps,
+            judge_temp=judge_temp,
+            workers=workers,
+        )
+        return
+
     samples = load_samples(input_path)
     if limit is not None:
         samples = samples[:limit]
