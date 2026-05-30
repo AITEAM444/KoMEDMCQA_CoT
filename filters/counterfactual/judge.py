@@ -8,10 +8,42 @@ possibly spurious final "answer" line, then scores target support from 1 to 5.
 
 from __future__ import annotations
 
+import json
 import re
 import time
 
-from filters.judge.score_faithfulness import parse_geval_response
+
+def parse_geval_response(text):
+    """G-Eval/JSON judge 응답에서 {"score":..,"supported_letter":..,..} 추출.
+    (구 filters.judge.score_faithfulness 에서 inline — counterfactual judge 전용)"""
+    if not text or not text.strip():
+        return None
+    text = text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z]*\n", "", text)
+        text = re.sub(r"\n```$", "", text)
+
+    candidates = re.findall(r'\{[^{}]*"score"\s*:\s*[0-9]+[^{}]*\}', text)
+    if candidates:
+        for candidate in reversed(candidates):
+            try:
+                obj = json.loads(candidate)
+                if isinstance(obj.get("score"), (int, float)) and 1 <= obj["score"] <= 5:
+                    return obj
+            except json.JSONDecodeError:
+                continue
+
+    m = re.findall(r'"score"\s*:\s*([1-5])', text)
+    if m:
+        return {"score": int(m[-1]), "reason": "recovered_from_broken_json"}
+
+    m = re.findall(r'(\d)\s*점\s*(?:기준|에 해당|입니다|[:.])', text)
+    if m:
+        sc = int(m[-1])
+        if 1 <= sc <= 5:
+            return {"score": sc, "reason": "recovered_from_korean_text"}
+
+    return None
 
 
 _LETTERS = ["A", "B", "C", "D", "E"]

@@ -54,11 +54,28 @@ from pathlib import Path
 import yaml
 
 from filters.base import BaseFilter
-from filters.think_final_divergence.run import (
-    _KO_HEDGE_PATTERNS,
-    _hedge_rate_per_100words,
-)
 from utils.schema import CoTSample
+
+
+# hedge 신호 헬퍼 (구 filters.think_final_divergence 에서 inline — counterfactual 전용).
+# R1 의 망설임/번복 표지. 사후합리화 판정의 보조 신호(hedge_gap)에 쓰인다.
+_KO_HEDGE_PATTERNS: list[str] = [
+    "하지만", "그러나", "다시 생각", "확실하지", "정정",
+    "아닌 것 같", "다른 것 같", "혹시", "잠깐", "재고",
+    "다시 보면", "다시 살펴", "재확인", "아닐 수도",
+    "맞는지", "맞지 않", "수정", "틀렸", "잘못",
+    "오히려", "그렇지 않", "아닌가",
+]
+
+
+def _count_hedges(text: str, patterns: list[str]) -> int:
+    text_lower = text.lower()
+    return sum(text_lower.count(p) for p in patterns)
+
+
+def _hedge_rate_per_100words(text: str, patterns: list[str]) -> float:
+    words = text.split()
+    return _count_hedges(text, patterns) / max(len(words), 1) * 100
 
 
 # R1 이 "다시 생각해보자", "확실하지 않다" 같은 망설임을 *실제로 쓰는 위치는 <think> 블록*
