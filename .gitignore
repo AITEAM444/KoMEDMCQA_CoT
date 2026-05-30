@@ -1,0 +1,24 @@
+# 데이터·산출물 (대용량, 재현 가능 / PII)
+data/*
+!data/.gitkeep
+results/*
+!results/.gitkeep
+output/
+*.jsonl
+*.pkl
+*.xlsx
+
+# 모델·캐시
+models/
+*.safetensors
+*.bin
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# env
+.env
