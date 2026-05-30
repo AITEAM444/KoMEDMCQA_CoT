@@ -11,31 +11,24 @@ class Subset(str, Enum):
 
 
 class FilterName(str, Enum):
-    # PRE — 항상 적용 (Ablation 대상 아님)
-    CORRECTNESS = "correctness"            # ①
-    STRUCTURE = "structure"                # ②
-    # Ablation 대상 필터 (Step 1 독립 측정)
-    KPPL = "kppl"                          # ③
-    STEP_COVERAGE = "step_coverage"        # ④
-    ANSWER_CONSISTENCY = "answer_consistency"  # ⑤
-    # 제안 층위 — Ablation 뒤 별도 단계로 적용 (C2 → C3 비교)
-    THINK_FINAL_DIVERGENCE = "think_final_divergence"  # ⑥
-    MATCHA = "matcha"                      # ⑦ (Answer-Conditioned Input Perturbation)
-    COUNTERFACTUAL = "counterfactual"      # ⑧ (Inverse MATCHA — Answer Counterfactual)
-    # TAIL — 항상 적용 (Ablation 대상 아님)
-    JUDGE = "judge"                        # ⑨
+    # C1 — DeepSeek-R1 표준 baseline 정제 (①~④, 고정값)
+    CORRECTNESS = "correctness"        # ① 정답 게이트
+    READABILITY = "readability"        # ② 혼합언어/가독성 (한글비율 필터 비채택)
+    STRUCTURE = "structure"            # ③ 형식/파싱 게이트
+    LENGTH = "length"                  # ④ 길이 필터
+    # C2 — 범용 LLM Judge (대조군)
+    JUDGE_GENERAL = "judge_general"
+    # C3 — 반사실 충실성 필터 (본 연구 기여, Inverse-MATCHA)
+    COUNTERFACTUAL = "counterfactual"
 
 
-PRE_FILTERS = [FilterName.CORRECTNESS, FilterName.STRUCTURE]
-ABLATION_FILTERS = [
-    FilterName.KPPL,
-    FilterName.STEP_COVERAGE,
-    FilterName.ANSWER_CONSISTENCY,
+# C1 표준 baseline = ①~④ (R1 2501.12948 정제 절차 고정값)
+C1_FILTERS = [
+    FilterName.CORRECTNESS,
+    FilterName.READABILITY,
+    FilterName.STRUCTURE,
+    FilterName.LENGTH,
 ]
-PROPOSAL_FILTERS = [FilterName.THINK_FINAL_DIVERGENCE, FilterName.MATCHA, FilterName.COUNTERFACTUAL]
-TAIL_FILTERS = [FilterName.JUDGE]
-
-FILTER_ORDER = PRE_FILTERS + ABLATION_FILTERS + PROPOSAL_FILTERS + TAIL_FILTERS
 
 
 @dataclass
