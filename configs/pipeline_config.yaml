@@ -16,3 +16,10 @@ proposal_filters:
     min_orig_score: 2.0        # orig_score < 2.0 → 독립 안전망(OR)으로 탈락. null=비활성 (1~5 스케일)
     hedge_gap_threshold: 0.5   # AND-rule: gap 의심 AND hedge_gap>=0.5 일 때만 탈락 (gap 단독 over-reject 완화)
     on_missing: "pass"         # precompute 누락 시 정책: "pass" | "fail"
+
+# ── C1 표준 baseline 필터 임계값 (②readability ④length; ①③은 임계값 불필요) ──
+c1_filters:
+  garbage_ratio_max: 0.15   # 정상문자 외(他CJK·이상기호) 비율 초과 → 깨진 혼합언어로 제거
+  max_run_no_space: 200     # 공백 없는 최대 토큰 길이 초과 → run-on/garbled
+  min_words: 20             # reasoning 단어 < 20 → 추론 없음
+  max_words: 4000           # reasoning 단어 > 4000 → 반복·발산
