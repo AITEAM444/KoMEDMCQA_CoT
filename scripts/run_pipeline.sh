@@ -41,6 +41,8 @@ echo "== 4) 반사실 채점(judge) — precompute =="
     --input "$CF_RAW" --output "$CF_JUDGED" --workers "$WORKERS"
 
 echo "== 5) C3 merge (C1 ∩ 반사실 통과) =="
+# (선택) 임계값(gap/hedge/min_orig)은 configs/pipeline_config.yaml 기본값 사용.
+#   dev 로 재보정하려면 먼저: src/eval/calibrate.py 스윕 표 확인 → config 수정 후 이 단계 실행 (README 참고)
 python src/dataset/build_arms.py merge-c3 --unified "$UNIFIED" --cf "$CF_JUDGED" --output "$UNIFIED"
 
 echo "== 6) C2 범용 judge 채점 + merge (상위 |C3|) =="

@@ -89,6 +89,7 @@ utils/ configs/ scripts/ data/ results/
 |---|---|---|
 | [src/train/train_lora.py](src/train/train_lora.py) | arm×seed export→dataset 등록→LLaMA-Factory LoRA 학습(질문 마스킹, seq 4096) | `output/qwen3-8b-<arm>-s<seed>/` |
 | [src/eval/evaluate.py](src/eval/evaluate.py) | KorMedMCQA test 정답률(전체/과목별, resume) | `eval_*.jsonl` |
+| [src/eval/calibrate.py](src/eval/calibrate.py) | **dev** 로 반사실 임계값(gap/hedge/min_orig) 스윕 → reject율·신호분포 표(학습 없음, 값은 직접 선택) | `calibrate_dev.md` |
 | [src/eval/stats.py](src/eval/stats.py) | seed mean±std + 부트스트랩 95% CI + McNemar 짝지은 검정 | `stats.json` |
 | [src/eval/sanity_zeroshot.py](src/eval/sanity_zeroshot.py) | base/distill zero-shot 하한 점검(학습 작동 확인) | `sanity_*.jsonl` |
 | [src/eval/compare_judges.py](src/eval/compare_judges.py) | judge 모델 동등성(ref vs cand) 검증 | `judge_compare.json` |
@@ -177,6 +178,24 @@ python src/dataset/build_arms.py merge-c3 \
   --unified data/unified.jsonl --cf data/cf_judged.json --output data/unified.jsonl
 # → unified 에 filters.C3 + signals.counterfactual(gap, orig_score, hedge ...) 적재
 ```
+
+#### (보정) dev 로 임계값 고르기 — §3 "dev 로 임계값 보정 (test 로 맞추면 부정행위)"
+`gap/hedge/min_orig` 기본값(1.5 / 0.5 / 2.0)은 [configs/pipeline_config.yaml](configs/pipeline_config.yaml)에 박혀 있다.
+이를 **dev** 로 정당화·재선택하려면, train 과 동일하게 dev 의 CF 를 생성·채점한 뒤 스윕 표를 본다.
+```bash
+# dev CF 생성 → 채점 (train 과 동일 절차, --split dev)
+python src/filters/counterfactual_adapter.py --total -1 --split dev --workers 16 \
+  --output data/dev_cf.jsonl
+python -m filters.counterfactual.precompute --input data/dev_cf.jsonl \
+  --output data/dev_cf_judged.json --k 1 --workers 16
+# 임계값 스윕 표(학습 없음) — reject율·사유분해·신호분포를 보고 값을 직접 고른다
+python src/eval/calibrate.py --cf data/dev_cf_judged.json \
+  --gaps 1.0 1.25 1.5 1.75 2.0 --hedges none 0.0 0.5 1.0 --min-origs none 2.0 \
+  --output results/calibrate_dev.md
+# → 고른 값을 configs/pipeline_config.yaml 의 counterfactual 에 반영하고 §3-3(merge-c3) 재실행
+```
+> 표만 출력하고 **최종값은 사람이 선택**한다(다운스트림 ACC 기반 자동 선택은 학습이 필요해 제외).
+> test split 로는 절대 보정하지 않는다.
 
 ### 4) C2 — 범용 LLM Judge(대조군) — §6.2 / H3
 ```bash
