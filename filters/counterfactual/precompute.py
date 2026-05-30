@@ -49,16 +49,27 @@ from utils.schema import CoTSample
 
 
 def _make_judge() -> tuple[object, str]:
-    """judge backend = OpenAI GPT-5 (OPENAI_API_KEY).
+    """judge backend = OpenAI GPT-5.
 
-    모델은 OPENAI_JUDGE_MODEL 환경변수로 override 가능(default "gpt-5").
+    환경변수:
+      OPENAI_API_KEY     (필수)
+      OPENAI_BASE_URL    GPT-5 가 mindlogic 게이트웨이면 반드시 지정
+                         (예: https://factchat-cloud.mindlogic.ai/v1/gateway).
+                         미지정 시 api.openai.com 직행 → 게이트웨이 키면 401.
+      OPENAI_JUDGE_MODEL 모델 override (default "gpt-5")
+
+    어느 엔드포인트로 가는지 로그로 찍어 '조용한 401'(잘못된 엔드포인트로 점수 전부
+    None) 을 바로 알아채게 한다.
     """
     from openai import OpenAI
     key = os.environ.get("OPENAI_API_KEY")
     if not key:
         raise RuntimeError("OPENAI_API_KEY 가 필요합니다 (GPT-5 judge용).")
+    base_url = os.environ.get("OPENAI_BASE_URL")  # 게이트웨이면 지정 (SDK 가 자동으로도 읽음)
     model = os.environ.get("OPENAI_JUDGE_MODEL", "gpt-5")
-    return OpenAI(api_key=key), model
+    client = OpenAI(api_key=key, base_url=base_url) if base_url else OpenAI(api_key=key)
+    print(f"[counterfactual:precompute] judge endpoint={client.base_url} model={model}")
+    return client, model
 
 
 _LETTERS = ["A", "B", "C", "D", "E"]
@@ -247,6 +258,25 @@ def run_existing_cf(
     if not ref_map:
         print("[counterfactual:precompute] ⚠ unified 참조를 못 찾았습니다. 문제/선지 정보가 제한됩니다.")
 
+    # 체크포인트 — 비용 큰 judge 결과(orig/cf 점수)만 인덱스별 캐시. sample 본체(질문/선지/
+    # cot)는 매번 싸게 재구성한다. 재실행 시 채점 성공분은 API 호출 없이 건너뛴다.
+    ckpt_path = output_path.with_suffix(".ckpt.jsonl")
+    cache: dict[int, dict] = {}
+    if ckpt_path.exists():
+        for line in open(ckpt_path, encoding="utf-8"):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+                cache[int(rec["i"])] = rec["judge"]
+            except (json.JSONDecodeError, KeyError, ValueError):
+                pass
+        print(f"[counterfactual:precompute] 체크포인트 {len(cache)}건 재사용 ← {ckpt_path}")
+    ckpt_f = open(ckpt_path, "a", encoding="utf-8")
+    lock = threading.Lock()
+    stats = {"api_fail": 0, "last_err": None}
+
     def _make_sample_and_result(i: int) -> tuple[int, CoTSample]:
         rec = cf_rows[i]
         key = _record_key(rec)
@@ -284,43 +314,57 @@ def run_existing_cf(
             metadata={k: v for k, v in metadata.items() if v is not None},
         )
 
-        cfs = []
-        if wrong_idx is None:
-            cfs.append({
-                "target_idx": None,
-                "target_letter": rec.get("wrong_letter"),
-                "cf_cot": cf_cot,
-                "cf_score": None,
-                "judge_runs": [],
-                "regen_model": rec.get("model", ""),
-                "error": "missing_wrong_letter",
-            })
+        cached = cache.get(i)
+        if cached is not None:
+            # 채점 캐시 재사용 (API 호출 없음)
+            cf_mean, cf_runs, cf_err = cached.get("cf_score"), cached.get("cf_runs", []), None
+            orig_mean, orig_runs, orig_err = cached.get("orig_score"), cached.get("orig_runs", []), None
         else:
-            cf = score_convincingness(
-                judge_client, question, cf_cot, wrong_idx,
-                model=judge_model, n_reps=judge_reps, temperature=judge_temp,
-                choices=choices,
-            )
-            cfs.append({
-                "target_idx": wrong_idx,
-                "target_letter": _LETTERS[wrong_idx],
-                "cf_cot": cf_cot,
-                "cf_score": cf["mean"],
-                "judge_runs": cf["runs"],
-                "regen_model": rec.get("model", ""),
-                "error": None if cf["mean"] is not None else "; ".join(str(e) for e in cf["errors"] if e),
-            })
+            # CF 채점
+            if wrong_idx is None:
+                cf_mean, cf_runs, cf_err = None, [], "missing_wrong_letter"
+            else:
+                cf = score_convincingness(
+                    judge_client, question, cf_cot, wrong_idx,
+                    model=judge_model, n_reps=judge_reps, temperature=judge_temp,
+                    choices=choices,
+                )
+                cf_mean, cf_runs = cf["mean"], cf["runs"]
+                cf_err = None if cf_mean is not None else "; ".join(str(e) for e in cf["errors"] if e)
+            # 원본 채점
+            if orig_cot:
+                orig = score_convincingness(
+                    judge_client, question, orig_cot, gold_idx,
+                    model=judge_model, n_reps=judge_reps, temperature=judge_temp,
+                    choices=choices,
+                )
+                orig_mean, orig_runs = orig["mean"], orig["runs"]
+                orig_err = None if orig_mean is not None else "; ".join(str(e) for e in orig["errors"] if e)
+            else:
+                orig_mean, orig_runs, orig_err = None, [], "missing_orig_cot"
+            # 에러 표면화 + 체크포인트 (cf 채점 성공 + orig(있으면) 성공일 때만 캐시 → 실패는 재시도)
+            with lock:
+                if cf_err or (orig_err and orig_err != "missing_orig_cot"):
+                    stats["api_fail"] += 1
+                    stats["last_err"] = cf_err or orig_err
+                if cf_mean is not None and (orig_mean is not None or not orig_cot):
+                    ckpt_f.write(json.dumps({
+                        "i": i, "id": str(sample.id),
+                        "judge": {"orig_score": orig_mean, "orig_runs": orig_runs,
+                                  "cf_score": cf_mean, "cf_runs": cf_runs},
+                    }, ensure_ascii=False) + "\n")
+                    ckpt_f.flush()
 
-        if orig_cot:
-            orig_score = score_convincingness(
-                judge_client, question, orig_cot, gold_idx,
-                model=judge_model, n_reps=judge_reps, temperature=judge_temp,
-                choices=choices,
-            )
-            orig_mean, orig_runs = orig_score["mean"], orig_score["runs"]
-        else:
-            orig_mean, orig_runs = None, []
-
+        target_letter = _LETTERS[wrong_idx] if wrong_idx is not None else rec.get("wrong_letter")
+        cfs = [{
+            "target_idx": wrong_idx,
+            "target_letter": target_letter,
+            "cf_cot": cf_cot,
+            "cf_score": cf_mean,
+            "judge_runs": cf_runs,
+            "regen_model": rec.get("model", ""),
+            "error": cf_err,
+        }]
         sample.metadata = {
             **sample.metadata,
             "counterfactual": {
@@ -346,8 +390,19 @@ def run_existing_cf(
                 idx, sample = fut.result()
                 results[idx] = sample
                 print(f"[counterfactual:precompute] {len(results)}/{len(cf_rows)} id={sample.id}")
+    ckpt_f.close()
 
     save_samples([results[i] for i in range(len(cf_rows))], output_path)
+
+    # 채점 성공/실패 요약 — '조용한 전부 None' 을 끝에서 한 번 더 경고
+    n_scored = sum(1 for s in results.values()
+                   if s.metadata.get("counterfactual", {}).get("orig_score") is not None
+                   or any(c.get("cf_score") is not None
+                          for c in s.metadata.get("counterfactual", {}).get("counterfactuals", [])))
+    print(f"[counterfactual:precompute] 채점된 샘플 {n_scored}/{len(cf_rows)} (체크포인트: {ckpt_path})")
+    if stats["api_fail"]:
+        print(f"[counterfactual:precompute] ⚠️ judge API 실패 {stats['api_fail']}건 → 점수 None. 예: {stats['last_err']}")
+        print("   → OPENAI_BASE_URL(게이트웨이)/OPENAI_API_KEY 확인. 재실행 시 성공분은 체크포인트로 건너뜀.")
 
 
 # ── Teacher CoT 재생성기 (구 filters/counterfactual/regenerator.py 인라인) ──────────
