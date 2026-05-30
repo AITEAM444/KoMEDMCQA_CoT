@@ -1,0 +1,53 @@
+# Qwen3-8B LoRA SFT — 5-arm 공통 base (Colab 단일 GPU)
+#
+# 단독 실행(C1 단일 시드):
+#   llamafactory-cli train configs/qwen3_8b_lora.yaml
+# 전체 자동화(arm×시드)는 src/train/train_lora.py 가 이 base 를 읽어
+#   dataset / output_dir / seed 만 덮어쓴 임시 yaml 을 arm·시드별로 생성해 호출한다.
+#
+# GPU별:
+#   A100 40GB    → 이대로 (plain LoRA, bf16 base 16GB + adapter)
+#   T4/V100 16GB → 'quantization_bit: 4' 주석 해제 (QLoRA; plain LoRA 는 24GB+ 필요)
+
+### model
+model_name_or_path: Qwen/Qwen3-8B
+trust_remote_code: true
+
+### method (LoRA)
+stage: sft
+do_train: true
+finetuning_type: lora
+lora_rank: 32
+lora_alpha: 64
+lora_dropout: 0.05
+lora_target: all
+# quantization_bit: 4        # ← T4/V100(16GB) 이면 주석 해제 (QLoRA)
+
+### dataset  (train_lora.py 가 arm 별로 dataset 키를 덮어쓴다)
+dataset: komed_c1           # 기본 단독 실행 시 C1. komed_c0/c1/c2/c3/crand 중 하나
+dataset_dir: data/sft       # build_arms export 결과(train_C*.jsonl)를 둔 곳
+template: qwen3             # 구버전 LLaMA-Factory면 qwen
+cutoff_len: 4096           # Colab 안전값. A100 40GB면 8192 가능
+overwrite_cache: true
+preprocessing_num_workers: 4
+# sharegpt 포맷 → user(질문) 턴은 자동 마스킹, assistant(추론+정답)만 loss.
+# train_on_prompt 는 명시하지 않으면 false(=질문 마스킹) 가 기본이다.
+
+### output  (train_lora.py 가 arm/seed 별로 output_dir 을 덮어쓴다)
+output_dir: output/qwen3-8b-lora-C1/seed0
+logging_steps: 10
+save_strategy: epoch
+plot_loss: true
+overwrite_output_dir: true
+report_to: none
+
+### train
+seed: 0                     # train_lora.py 가 시드별로 덮어쓴다
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 16   # 유효 배치 16
+learning_rate: 1.0e-4             # LoRA 는 full FT 보다 높은 LR
+num_train_epochs: 3.0
+lr_scheduler_type: cosine
+warmup_ratio: 0.03
+bf16: true
+gradient_checkpointing: true
