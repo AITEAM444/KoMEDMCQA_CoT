@@ -2,7 +2,7 @@
 
 연구계획 §6.2 / H3: "정답이 맞는 trace 안에서 *범용* 채점 AI 는 변별을 못 한다"를
 입증하기 위한 대조군. C1 통과 trace 를 DC-CoT(2505.18759) 류 **범용 품질 루브릭**
-(coherence / correctness-justification / clarity)으로 1~10 점화한다.
+(coherence / correctness-justification / clarity)으로 1~5 점화한다.
 
 반사실 필터(C3)의 judge 와는 *개념상 별개*다:
   - C2 judge_general : "이 풀이가 (답 무관하게) 일반적으로 잘 쓰였나" — 범용 품질
@@ -73,7 +73,7 @@ you could find a better answer):
                        anatomy / differential exclusion), not just restate the answer?
   (3) Clarity        — is it clearly written, well-organized, free of garbled/run-on text?
 
-Give an overall integer score from 1 to 10 (10 = excellent on all three axes,
+Give an overall integer score from 1 to 5 (5 = excellent on all three axes,
 1 = incoherent / no justification / unreadable).
 
 [Question]
@@ -86,12 +86,12 @@ Give an overall integer score from 1 to 10 (10 = excellent on all three axes,
 {cot}
 
 Output ONLY this JSON, no other text:
-{{"coherence": <1-10>, "justification": <1-10>, "clarity": <1-10>, "score": <1-10>, "reason": "<one sentence>"}}
+{{"coherence": <1-5>, "justification": <1-5>, "clarity": <1-5>, "score": <1-5>, "reason": "<one sentence>"}}
 """
 
 
 def _parse_quality(text: str) -> dict | None:
-    """judge 응답에서 {"score":1-10, ...} 추출 (JSON → 정규식 폴백)."""
+    """judge 응답에서 {"score":1-5, ...} 추출 (JSON → 정규식 폴백)."""
     if not text or not text.strip():
         return None
     t = text.strip()
@@ -101,14 +101,14 @@ def _parse_quality(text: str) -> dict | None:
     for cand in reversed(re.findall(r'\{[^{}]*"score"\s*:\s*[0-9]+[^{}]*\}', t)):
         try:
             obj = json.loads(cand)
-            if isinstance(obj.get("score"), (int, float)) and 1 <= obj["score"] <= 10:
+            if isinstance(obj.get("score"), (int, float)) and 1 <= obj["score"] <= 5:
                 return obj
         except json.JSONDecodeError:
             continue
-    m = re.findall(r'"score"\s*:\s*([0-9]{1,2})', t)
+    m = re.findall(r'"score"\s*:\s*([0-9])', t)
     if m:
         sc = int(m[-1])
-        if 1 <= sc <= 10:
+        if 1 <= sc <= 5:
             return {"score": sc, "reason": "recovered_from_broken_json"}
     return None
 
@@ -124,7 +124,7 @@ def score_quality(
     *, n_reps: int = 1, temperature: float = 0.3, sleep_on_error: float = 2.0,
     max_chars: int = 8000,
 ) -> dict:
-    """단일 CoT 의 범용 품질 점수(1~10). n_reps>1 이면 평균."""
+    """단일 CoT 의 범용 품질 점수(1~5). n_reps>1 이면 평균."""
     gold_letter = _LETTERS[gold_idx] if 0 <= gold_idx < len(_LETTERS) else "?"
     prompt = _QUALITY_RUBRIC.format(
         gold_letter=gold_letter,

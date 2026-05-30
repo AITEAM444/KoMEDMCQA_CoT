@@ -14,30 +14,96 @@ student 정확도를 유지·향상시키는 것이 증거.
 ## 절대 규칙
 - **test split 에는 Teacher CoT 를 생성하지 않는다** — 최종 평가(정확도)에만. calibration/early-stop 은 dev.
 
-## 실제 구성 (현재 구현된 것)
+## 핵심 개념 (먼저 읽기)
+
+### 1) 5개 비교군(arm)
+모든 arm 은 **같은 R1 trace 풀**에서 출발하고, 필터만 다르게 적용한 부분집합이다.
+| arm | 구성 | 역할 |
+|---|---|---|
+| **C0** | 필터 없음(raw) | 하한(lower bound) |
+| **C1** | 표준 baseline ①정답 ②가독성 ③형식/파싱 ④길이 | 일반적 정제 baseline |
+| **C-rand** | C1 통과분에서 무작위 \|C3\|개 | **크기 통제군** — 이득이 "크기 축소"가 아님을 보임 |
+| **C2** | C1 + 범용 LLM Judge 상위 \|C3\|개 | **대조군** — "일반 채점으론 못 잡음"을 보임 |
+| **C3** | C1 + 반사실 필터(제안) | **제안 방법** |
+
+핵심 비교: **C3 ≥ C1**(H2) · **C3 > C-rand**(H2 통제) · **C3 > C2**(H3, 같은 크기).
+
+### 2) 두 개의 judge — 헷갈리기 쉬우니 구분
+| | **C2 judge** ([judge_general.py](src/filters/judge_general.py)) | **C3 judge** ([counterfactual/judge.py](filters/counterfactual/judge.py) `_CF_RUBRIC`) |
+|---|---|---|
+| 목적 | 대조군: 범용 품질 채점 | 제안: 반사실 정당화 강도 |
+| 무엇을 보나 | 풀이 글 자체 품질 (**답은 안 바꿈**) | 답을 **오답으로 바꿔도** 똑같이 정당화되나 |
+| 기준 | coherence / justification / clarity | anti-label-cheating(`supported_letter` 먼저 판정 → target 불일치면 강제 1점) |
+| 척도 | **1~5** | **1~5** |
+| 모델 | GPT-5 (`OPENAI_API_KEY`) | GPT-5 (`OPENAI_API_KEY`) |
+| 산출 | `signals.c2_score` → 상위 \|C3\| = **C2** | `gap = orig_score − max(cf_score)` → 작으면 탈락 = **C3** |
+
+### 3) 신호(signals) — `data/unified.jsonl` 에 누적
+- **orig_score** (1~5): 원본 CoT 가 정답(gold)을 정당화하는 강도.
+- **cf_score** (1~5): cf-CoT 가 **오답**을 정당화하는 강도.
+- **gap = orig_score − max(cf_score)**: 작으면(기본 <1.5) "어떤 답이든 비슷하게 정당화" = **사후합리화 의심(탈락)**, 크면 답에 종속적 = 건강한 CoT.
+- **hedge_gap**: 망설임 표지("하지만/다시 생각/wait…") 비율 차이 — judge 와 독립적인 보조 신호(AND-rule).
+- **c2_score** (1~5): 범용 품질 점수(C2 선별용).
+
+### 4) 반사실 필터의 2단계 구조 (비용 분리)
+- **precompute**(1단계): cf-CoT 생성 + judge 채점 등 **모든 비싼 API 호출**을 여기서 끝내고 점수를 데이터에 박는다.
+- **run**(2단계): 박아둔 점수로 **산수만** 해서 통과/탈락 판정 → 임계값(gap 1.5 등)을 바꿔 여러 번 돌려도 비용 0.
+
+---
+
+## 디렉터리 & 모듈 역할
+
 ```
-configs/
-  pipeline_config.yaml        # 필터 파라미터 (C1 c1_filters + C3 counterfactual gap/hedge/min_orig)
-  train.yaml / qwen3_8b_*.yaml # Qwen3-8B LoRA/full SFT (LLaMA-Factory)
-  ds_zero3.json               # full FT DeepSpeed ZeRO-3
-  dataset_info.json           # LLaMA-Factory 데이터 등록
-src/
-  generation/generate_traces.py      # R1 trace 생성 (영어 instruction + 분야별 한국어 fewshot, reasoning_content 캡처)
-  filters/standard.py                # C1 표준 baseline ①~④ (reasoning 기준)
-  filters/counterfactual_adapter.py  # 반사실 CF 생성 (오답 강제 정당화, reasoning_content 신호)
-  filters/judge_general.py           # C2 범용 LLM Judge 채점 (대조군) → signals.c2_score
-  dataset/build_arms.py              # 통합 스키마 + arm(C0/C1/C2/C3/C-rand) merge·export
-  eval/evaluate.py                   # KorMedMCQA test 정확도 (전체/과목별, resume 내장)
-  eval/stats.py                      # seed mean±std + 부트스트랩 CI + McNemar
-  eval/sanity_zeroshot.py            # base/distill zero-shot 하한 점검
-  eval/compare_judges.py             # judge 모델 동등성 비교 (ref vs cand)
-  train/train_lora.py                # arm × seed 학습 자동화 (LLaMA-Factory 래퍼)
-  data/load_kormedmcqa.py            # KorMedMCQA 선지 join 유틸
-filters/                             # 작동 패키지: counterfactual{precompute,run,judge}(기여) + base(의존)
-scripts/run_pipeline.sh / make_report.py  # end-to-end 오케스트레이션 + 마크다운 리포트
-utils/                               # CoTSample 스키마 + 데이터 로더
-data/ , results/                     # 데이터·체크포인트 (.gitignore)
+src/generation/   trace 생성   |  src/filters/  필터·judge  |  src/dataset/  arm 빌드
+src/train/        학습          |  src/eval/     평가·통계    |  filters/      반사실 패키지(기여)
+utils/ configs/ scripts/ data/ results/
 ```
+
+**① 생성 (Teacher = DeepSeek-R1)**
+| 파일 | 역할 | 출력 |
+|---|---|---|
+| [src/generation/generate_traces.py](src/generation/generate_traces.py) | KorMedMCQA train 에 R1 long-CoT 생성(영어 instruction + 분야별 한국어 fewshot, R1 `reasoning_content` 캡처, 체크포인트·병렬) | `train_cot_fewshot.jsonl` |
+| [src/filters/counterfactual_adapter.py](src/filters/counterfactual_adapter.py) | 오답 1개를 정답이라 강제 → 그 오답을 정당화하는 cf-CoT 생성(생성 인프라 재사용, seed 로 오답 재현) | `train_cf.jsonl` |
+
+**② 필터 (arm 판정)**
+| 파일 | 역할 |
+|---|---|
+| [src/filters/standard.py](src/filters/standard.py) | **C1** 표준 baseline ①~④ 게이트(reasoning 기준 판정) |
+| [src/filters/judge_general.py](src/filters/judge_general.py) | **C2** judge — 범용 품질 1~5 채점(GPT-5) → `signals.c2_score` |
+| [filters/counterfactual/precompute.py](filters/counterfactual/precompute.py) | **C3 1단계** — 원본·cf CoT 를 `_CF_RUBRIC` 로 채점(GPT-5). 모든 API 호출 종결 |
+| [filters/counterfactual/judge.py](filters/counterfactual/judge.py) | `_CF_RUBRIC` 정의 + 채점 함수(anti-label-cheating) |
+| [filters/counterfactual/run.py](filters/counterfactual/run.py) | **C3 2단계** — gap/hedge_gap/min_orig + AND-rule 로 통과/탈락(산수만) |
+| [filters/base.py](filters/base.py) | 필터 베이스 클래스(`run`/`run_from_file`) |
+
+**③ arm 빌드 (데이터 통합 — 한 파일에 누적)**
+| 서브커맨드 ([build_arms.py](src/dataset/build_arms.py)) | 역할 |
+|---|---|
+| `unified` | trace ↔ KorMedMCQA(질문·선지·gold) join + **C0/C1** 판정 → `unified.jsonl` |
+| `merge-c3` | 채점 결과에 run.py 판정 적용 → `filters.C3` |
+| `merge-c2` | `c2_score` 상위 \|C3\|개 → `filters.C2` (크기 매칭) |
+| `make-crand` | C1 풀에서 랜덤 \|C3\|개 → `filters.C-rand` |
+| `export` | 특정 arm → SFT 형식(`messages`) jsonl |
+
+**④ 학습 · 평가 · 통계**
+| 파일 | 역할 | 출력 |
+|---|---|---|
+| [src/train/train_lora.py](src/train/train_lora.py) | arm×seed export→dataset 등록→LLaMA-Factory LoRA 학습(질문 마스킹, seq 4096) | `output/qwen3-8b-<arm>-s<seed>/` |
+| [src/eval/evaluate.py](src/eval/evaluate.py) | KorMedMCQA test 정답률(전체/과목별, resume) | `eval_*.jsonl` |
+| [src/eval/stats.py](src/eval/stats.py) | seed mean±std + 부트스트랩 95% CI + McNemar 짝지은 검정 | `stats.json` |
+| [src/eval/sanity_zeroshot.py](src/eval/sanity_zeroshot.py) | base/distill zero-shot 하한 점검(학습 작동 확인) | `sanity_*.jsonl` |
+| [src/eval/compare_judges.py](src/eval/compare_judges.py) | judge 모델 동등성(ref vs cand) 검증 | `judge_compare.json` |
+| [scripts/make_report.py](scripts/make_report.py) | arm 크기 + 신호 분포 + 통계/가설 점검 → 마크다운 | `report.md` |
+| [scripts/run_pipeline.sh](scripts/run_pipeline.sh) | 1~11 단계 end-to-end 오케스트레이션 | — |
+
+**⑤ 유틸 · 설정**
+| 파일 | 역할 |
+|---|---|
+| [utils/schema.py](utils/schema.py) | `CoTSample` 데이터클래스 + `FilterName` |
+| [utils/data_loader.py](utils/data_loader.py) | jsonl/json ↔ `CoTSample` 로더 |
+| [src/data/load_kormedmcqa.py](src/data/load_kormedmcqa.py) | KorMedMCQA 선지 join 유틸 |
+| [configs/pipeline_config.yaml](configs/pipeline_config.yaml) | C1 임계값(`c1_filters`) + C3 `gap/hedge/min_orig` |
+| `configs/train.yaml`, `qwen3_8b_*.yaml`, `ds_zero3.json`, `dataset_info.json` | LLaMA-Factory 학습/데이터 설정 |
+| `data/`, `results/` | 데이터·체크포인트 (`.gitignore`) |
 
 ## 환경
 ```bash
@@ -115,7 +181,7 @@ python src/dataset/build_arms.py merge-c3 \
 ### 4) C2 — 범용 LLM Judge(대조군) — §6.2 / H3
 ```bash
 # 4-1) src/filters/judge_general.py : C1 통과 trace 를 '범용 품질' 루브릭(coherence/
-#      justification/clarity)으로 1~10 채점 → signals.c2_score. (반사실과 달리 답을 안 바꿈)
+#      justification/clarity)으로 1~5 채점(GPT-5) → signals.c2_score. (반사실과 달리 답을 안 바꿈)
 python src/filters/judge_general.py \
   --unified data/unified.jsonl --output data/unified.jsonl --workers 8
 
