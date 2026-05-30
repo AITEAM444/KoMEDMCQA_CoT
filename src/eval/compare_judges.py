@@ -1,9 +1,10 @@
 """
-Judge 동등성 비교 — deepseek-chat vs solar-pro3 (Counterfactual judge 채택 검증).
+Judge 동등성 비교 — ref(기준) judge vs cand(후보) judge (Counterfactual judge 채택 검증).
 
 목적:
-    Counterfactual(Inverse-MATCHA) judge 를 deepseek-chat 에서 solar-pro3 로
-    교체해도 동일하게 작동하는지 검증한다. 통과하면 solar-pro3 를 Judge 모델로 채택.
+    Counterfactual(Inverse-MATCHA) judge 를 강력한 ref 모델에서 후보(cand) 모델로
+    교체해도 동일하게 작동하는지 검증한다. 통과하면 cand 를 Judge 모델로 채택.
+    (운영 judge 는 GPT-5 — 더 싼 대안으로 swap 가능한지 점검할 때 사용.)
 
 원칙(공정성):
     두 judge 가 *완전히 동일한 CoT* 를 채점해야 한다. 따라서 cf_cot 는 새로
@@ -23,13 +24,14 @@ Judge 동등성 비교 — deepseek-chat vs solar-pro3 (Counterfactual judge 채
     5. id4 sanity               : 두 judge 모두 supported_letter == "A" (원본 채점)
 
 전제:
-    UPSTAGE_API_KEY  (solar-pro3),  DEEPSEEK_API_KEY (deepseek-chat)
+    GATEWAY_API_KEY (ref/cand 둘 다 OpenAI 호환 게이트웨이로 호출; --base-url/--key-env 로 교체)
     --input 은 cf_cot 가 담긴 precompute 출력 JSON (필터링 전 전체 샘플).
 
 사용:
-    python scripts/compare_judges.py \
-        --input data/filtered/counterfactual_output_precomputed.json \
-        --output results/judge_compare/solar_vs_deepseek.json \
+    python src/eval/compare_judges.py \
+        --input data/cf_judged.json \
+        --ref-model claude-opus-4-8 --cand-model gpt-5 \
+        --output results/judge_compare/ref_vs_cand.json \
         --judge-reps 1 --workers 8
 """
 
@@ -55,9 +57,9 @@ from filters.counterfactual.judge import (
     _call_judge_with_model,
     _extract_internal_reasoning,
     _format_choices,
+    parse_geval_response,
 )
 from filters.counterfactual.run import CounterfactualFilter
-from filters.judge.score_faithfulness import parse_geval_response
 from utils.data_loader import load_samples
 
 
@@ -222,7 +224,7 @@ def main():
     p.add_argument("--input", type=Path, required=True, help="cf_cot 가 담긴 precompute 출력 JSON")
     p.add_argument("--output", type=Path, default=Path("results/judge_compare/ref_vs_cand.json"))
     p.add_argument("--ref-model", default="claude-opus-4-8", help="기준 judge 모델 (변별력 있는 강력 모델)")
-    p.add_argument("--cand-model", default="solar-pro3", help="후보 judge 모델 (채택 검토 대상)")
+    p.add_argument("--cand-model", default="gpt-5", help="후보 judge 모델 (채택 검토 대상)")
     p.add_argument("--base-url", default=DEFAULT_BASE_URL, help="OpenAI 호환 백엔드 base_url")
     p.add_argument("--key-env", default=DEFAULT_KEY_ENV, help="API 키 환경변수 이름")
     p.add_argument("--limit", type=int, default=None)
@@ -231,7 +233,7 @@ def main():
     p.add_argument("--workers", type=int, default=8)
     p.add_argument("--id4-letter", default="A", help="id4 sanity 기대 supported_letter (원본 채점)")
     p.add_argument("--reuse-cand-from", default=None,
-                   help="이전 리포트 JSON 경로 — 그 안의 cand(solar) 결과를 재사용해 cand 호출 생략(비용 절반)")
+                   help="이전 리포트 JSON 경로 — 그 안의 cand 결과를 재사용해 cand 호출 생략(비용 절반)")
     p.add_argument("--abort-after-fails", type=int, default=8,
                    help="연속 N건 API 실패(토큰소진 등) 시 즉시 중단 (완료분은 체크포인트에 보존)")
     p.add_argument("--ref-only", action="store_true",
@@ -263,13 +265,14 @@ def main():
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
-    # 후보(cand) 결과 재사용 — 이전 리포트의 cand(solar) 채점을 그대로 사용 → cand 호출 생략
+    # 후보(cand) 결과 재사용 — 이전 리포트의 cand 채점을 그대로 사용 → cand 호출 생략
     reuse_cand = {}
     if args.reuse_cand_from and Path(args.reuse_cand_from).exists():
         prev = json.load(open(args.reuse_cand_from, encoding="utf-8"))
         for r in prev.get("per_sample", []):
-            if isinstance(r.get("solar"), dict) and r["solar"].get("orig"):
-                reuse_cand[str(r["id"])] = r["solar"]
+            cand_prev = r.get("cand")
+            if isinstance(cand_prev, dict) and cand_prev.get("orig"):
+                reuse_cand[str(r["id"])] = cand_prev
         print(f"[compare] cand 재사용 {len(reuse_cand)}건 ← {args.reuse_cand_from}")
 
     # 체크포인트 — 완료 샘플을 JSONL 로 append. 재시작 시 해당 id 건너뜀.
@@ -314,16 +317,16 @@ def main():
         ds = judge_sample(ref_client, args.ref_model, sample, cfs, reps=args.judge_reps, temp=args.judge_temp)
         sid = str(sample.id)
         if args.ref_only:
-            sol = _stub_judged(cfs)               # cand 생략 — ref 점수만 수집
+            cand = _stub_judged(cfs)               # cand 생략 — ref 점수만 수집
         elif sid in reuse_cand:
-            sol = reuse_cand[sid]
+            cand = reuse_cand[sid]
         else:
-            sol = judge_sample(cand_client, args.cand_model, sample, cfs, reps=args.judge_reps, temp=args.judge_temp)
+            cand = judge_sample(cand_client, args.cand_model, sample, cfs, reps=args.judge_reps, temp=args.judge_temp)
         return i, {
             "id": sample.id,
-            "ds": ds, "solar": sol,
+            "ds": ds, "cand": cand,
             "ds_keep": decide_keep(sample, ds, k),
-            "solar_keep": decide_keep(sample, sol, k),
+            "cand_keep": decide_keep(sample, cand, k),
         }
 
     def _log(i, r):
@@ -331,14 +334,14 @@ def main():
             done["n"] += 1
             ckpt_f.write(json.dumps(r, ensure_ascii=False) + "\n"); ckpt_f.flush()
             ref_dead = bool(r["ds"].get("api_dead"))
-            cand_dead = bool(r["solar"].get("api_dead")) if isinstance(r["solar"], dict) else False
+            cand_dead = bool(r["cand"].get("api_dead")) if isinstance(r["cand"], dict) else False
             consec_fail["n"] = consec_fail["n"] + 1 if (ref_dead or cand_dead) else 0
             tag = ""
             if ref_dead or cand_dead:
-                err = r["ds"].get("last_err") or (r["solar"].get("last_err") if isinstance(r["solar"], dict) else None)
+                err = r["ds"].get("last_err") or (r["cand"].get("last_err") if isinstance(r["cand"], dict) else None)
                 tag = f"  ⚠️API실패{'[ref]' if ref_dead else ''}{'[cand]' if cand_dead else ''} {err}"
             print(f"[compare] {done['n']}/{len(work)} id={r['id']} "
-                  f"ds_keep={r['ds_keep']} solar_keep={r['solar_keep']}{tag}")
+                  f"ds_keep={r['ds_keep']} cand_keep={r['cand_keep']}{tag}")
             if consec_fail["n"] >= args.abort_after_fails and not abort.is_set():
                 print(f"\n🛑 연속 {consec_fail['n']}건 API 실패 — 토큰 소진/장애 의심. 중단합니다. "
                       f"(완료 {done['n']}건은 {ckpt_path} 에 보존)")
@@ -373,11 +376,11 @@ def main():
     # ── 인스턴스 단위 수집 (원본/CF 태깅) ──────────────────────────────────────
     inst = []  # {type, dl, sl, dm, sm, dsc, ssc}
     for r in ordered:
-        o_d, o_s = r["ds"]["orig"], r["solar"]["orig"]
+        o_d, o_s = r["ds"]["orig"], r["cand"]["orig"]
         inst.append({"type": "orig", "dl": o_d["supported_letter"], "sl": o_s["supported_letter"],
                      "dm": o_d["matches_target"], "sm": o_s["matches_target"],
                      "dsc": o_d["score"], "ssc": o_s["score"]})
-        for dc, sc in zip(r["ds"]["cfs"], r["solar"]["cfs"]):
+        for dc, sc in zip(r["ds"]["cfs"], r["cand"]["cfs"]):
             inst.append({"type": "cf", "dl": dc["supported_letter"], "sl": sc["supported_letter"],
                          "dm": dc["matches_target"], "sm": sc["matches_target"],
                          "dsc": dc["score"], "ssc": sc["score"]})
@@ -395,19 +398,19 @@ def main():
     sup_cf, sup_cf_n = agree([i for i in inst if i["type"] == "cf"], "dl", "sl")
 
     # ② reject 결정 일치율 (SWAP 판정)
-    keep_pairs = [(r["ds_keep"], r["solar_keep"]) for r in ordered]
+    keep_pairs = [(r["ds_keep"], r["cand_keep"]) for r in ordered]
     reject_rate = sum(1 for a, b in keep_pairs if a == b) / len(keep_pairs)
     ds_reject = {r["id"] for r in ordered if not r["ds_keep"]}
-    sol_reject = {r["id"] for r in ordered if not r["solar_keep"]}
-    union = len(ds_reject | sol_reject)
-    reject_jaccard = (len(ds_reject & sol_reject) / union) if union else 1.0
+    cand_reject = {r["id"] for r in ordered if not r["cand_keep"]}
+    union = len(ds_reject | cand_reject)
+    reject_jaccard = (len(ds_reject & cand_reject) / union) if union else 1.0
 
     # id4 sanity (원본 채점 supported_letter)
     id4 = next((r for r in ordered if str(r["id"]) == "4"), None)
     id4_info = None
     if id4 is not None:
         id4_info = {"ds_supported": id4["ds"]["orig"]["supported_letter"],
-                    "solar_supported": id4["solar"]["orig"]["supported_letter"],
+                    "cand_supported": id4["cand"]["orig"]["supported_letter"],
                     "expected": args.id4_letter}
 
     # 진단용(참고) — 판정엔 미반영
@@ -425,7 +428,7 @@ def main():
     def ok(v, thr):
         return v is not None and v >= thr
 
-    id4_pass = (bool(id4_info) and id4_info["solar_supported"] == args.id4_letter
+    id4_pass = (bool(id4_info) and id4_info["cand_supported"] == args.id4_letter
                 and id4_info["ds_supported"] == args.id4_letter)
     swap_checks = {
         "supported_letter": {"value": sup_rate, "n": sup_n, "kappa": kappa,
@@ -433,7 +436,7 @@ def main():
         "reject_decision": {"value": reject_rate, "reject_jaccard": reject_jaccard,
                             "pass": ok(reject_rate, 0.85), "thr": ">=85%"},
         "id4_sanity": {"value": id4_info, "pass": id4_pass,
-                       "thr": f'solar & ds supported_letter == "{args.id4_letter}"'},
+                       "thr": f'cand & ds supported_letter == "{args.id4_letter}"'},
     }
     verdict = all(c["pass"] for c in swap_checks.values())
 
@@ -448,7 +451,7 @@ def main():
         "matches_target": {"overall": mt_rate, "orig": mt_orig, "cf": mt_cf, "n": mt_n},
         "score_spearman": spearman,
         "reject_jaccard": reject_jaccard,
-        "ds_reject_ids": sorted(ds_reject, key=str), "solar_reject_ids": sorted(sol_reject, key=str),
+        "ds_reject_ids": sorted(ds_reject, key=str), "cand_reject_ids": sorted(cand_reject, key=str),
     }
 
     report = {

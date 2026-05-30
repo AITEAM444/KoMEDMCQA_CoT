@@ -74,8 +74,27 @@ def _extract_internal_reasoning(cot: str) -> str:
     return cot.strip()
 
 
+# 추론(reasoning) 모델 — temperature 미지원 + max_completion_tokens 사용 + thinking 토큰 소비.
+_REASONING_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+
+
+def _is_reasoning_model(model: str) -> bool:
+    return any(model.startswith(p) for p in _REASONING_PREFIXES)
+
+
 def _call_judge_with_model(client, model: str, prompt: str, temperature: float, max_tokens: int = 1024) -> str:
-    """Call a judge model through an OpenAI-compatible chat client."""
+    """Call a judge model through an OpenAI-compatible chat client.
+
+    GPT-5/o-series(reasoning) 는 temperature 를 받지 않고 max_completion_tokens 를 쓰며
+    thinking 토큰을 소비하므로 토큰 여유를 둔다.
+    """
+    if _is_reasoning_model(model):
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_completion_tokens=max(max_tokens, 4000),
+        )
+        return resp.choices[0].message.content
     resp = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
@@ -137,7 +156,7 @@ def score_convincingness(
     cot: str,
     target_idx: int,
     *,
-    model: str = "solar-pro3",
+    model: str = "gpt-5",
     n_reps: int = 1,
     temperature: float = 0.3,
     sleep_on_error: float = 2.0,

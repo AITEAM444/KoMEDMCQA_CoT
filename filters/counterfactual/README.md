@@ -46,7 +46,7 @@ Judge Δ/δ 어블레이션 대상이 아니라 **C2 vs C3 다운스트림 Stude
 4. 결과를 `metadata["counterfactual"]`에 적재.
 
 **판정 방식: 별도 수식이 아니라 프롬프트 기반 LLM-as-a-Judge.** judge 백엔드는
-`UPSTAGE_API_KEY`가 있으면 Solar Pro 3, 없으면 DeepSeek-Chat
+OpenAI **GPT-5** (`OPENAI_API_KEY`; 모델은 `OPENAI_JUDGE_MODEL` 로 override)
 ([`_make_judge`](precompute.py)).
 
 #### `--regen-only` 모드 (F6 1단계)
@@ -174,8 +174,8 @@ python -m filters.counterfactual.run `
 | 변수 | 용도 |
 |---|---|
 | `DEEPSEEK_API_KEY` (또는 `MATCHA_TEACHER_API_KEY`) | CF CoT 재생성 (R1) |
-| `UPSTAGE_API_KEY` | judge 백엔드 = Solar Pro 3 (있으면 우선) |
-| (없으면 DEEPSEEK_API_KEY) | judge 백엔드 = DeepSeek-Chat fallback |
+| `OPENAI_API_KEY` | judge 백엔드 = OpenAI GPT-5 |
+| `OPENAI_JUDGE_MODEL` (선택) | judge 모델 override (default `gpt-5`) |
 
 `TeacherRegenerator` 추가 오버라이드: `MATCHA_TEACHER_BASE_URL`(default `https://api.deepseek.com`),
 `MATCHA_TEACHER_MODEL`(default `deepseek-reasoner`).

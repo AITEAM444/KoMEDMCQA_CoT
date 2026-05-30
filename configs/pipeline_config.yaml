@@ -1,10 +1,8 @@
 # 필터 파라미터.
-# 현재 코드가 실제로 읽는 건 proposal_filters.counterfactual (C3) 뿐이다.
-# C1(정답/가독성/형식/길이)·C2(judge_general)는 구현 시 여기에 섹션을 추가한다.
-
-# ── C1 표준 baseline (DeepSeek-R1 2501.12948 정제 절차, 고정값) ──
-#   correctness / readability(혼합언어·가독성) / structure(형식·파싱) / length
-#   — 현재 코드는 config 미사용. judge_general(C2) 포함 구현 시 여기에 노출.
+#   C1(c1_filters)        : src/filters/standard.py 가 읽음 (②readability ④length 임계값).
+#   C3(proposal_filters.counterfactual): filters/counterfactual/run.py 가 읽음.
+#   C2(judge_general)     : src/filters/judge_general.py — 임계값 대신 상위 N=|C3| 선택
+#                           (build_arms merge-c2). 채점 파라미터는 CLI 인자로 제어.
 
 # ── C3 — 반사실 충실성 필터 (Inverse-MATCHA). filters/counterfactual/run.py 가 읽음 ──
 proposal_filters:

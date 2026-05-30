@@ -7,6 +7,8 @@ build_arms — 통합 데이터셋(스펙 §7) 빌드 + arm 별 SFT export.
              C2/C3/C-rand 는 나중 단계(judge_general / counterfactual / 랜덤)에서 채운다.
   merge-c3   채점된 counterfactual 파일(metadata.counterfactual) → CounterfactualFilter 적용
              → filters.C3 = (C1 통과 AND counterfactual 통과) 채움. (run.py 로직 재사용)
+  merge-c2   judge_general 이 채운 signals.c2_score → 상위 |C3|개를 filters.C2=True.
+             C3 와 크기 매칭(H3 공정 비교). merge-c3 다음에 실행.
   make-crand C3 의 수량 통제군. C1 통과 풀에서 시드 고정 랜덤 |C3|개 → filters."C-rand"=True.
              merge-c3 다음에 실행해야 |C3| 가 정해진다.
   export     통합 레코드 → arm(C0/C1/C2/C3/C-rand) 슬라이스 → SFT messages
@@ -192,6 +194,49 @@ def cmd_merge_c3(args):
               f"(|C3| 가 과소집계됨)")
 
 
+def cmd_merge_c2(args):
+    """C2 = C1 + 범용 judge 상위 N개 (N=|C3|, 크기 매칭) → filters.C2 채움.
+
+    judge_general.py 가 채운 signals.c2_score 를 읽어, C1 통과 풀에서 점수 상위
+    |C3| 개를 C2=True 로 표시한다. C3 와 동일 크기로 맞춰 H3(같은 크기에서 judge
+    필터보다 반사실이 낫다)를 공정 비교한다. merge-c3 다음에 실행해야 |C3| 가 정해진다.
+    """
+    rows = _read_unified(args.unified)
+    n_c3 = sum(1 for r in rows if r.get("filters", {}).get("C3") is True)
+    pool = [r for r in rows
+            if r.get("filters", {}).get("C1") is True
+            and r.get("signals", {}).get("c2_score") is not None]
+    n_unscored = sum(1 for r in rows
+                     if r.get("filters", {}).get("C1") is True
+                     and r.get("signals", {}).get("c2_score") is None)
+
+    if n_c3 == 0:
+        print("[merge-c2] ⚠ C3=True 가 0건 — merge-c3 를 먼저 실행하세요(크기 매칭 불가). 중단.")
+        return
+    if not pool:
+        print("[merge-c2] ⚠ c2_score 가 채워진 C1 통과 행이 없음 — judge_general.py 를 먼저 실행하세요. 중단.")
+        return
+    if n_unscored:
+        print(f"[merge-c2] ⚠ C1 통과 중 c2_score 미채점 {n_unscored}건 — Top-N 후보에서 제외됨 "
+              f"(judge_general.py 로 전체 채점 권장).")
+
+    # 점수 내림차순 정렬(동점은 id 로 안정 정렬) → 상위 |C3| 선택
+    pool.sort(key=lambda r: (-r["signals"]["c2_score"], str(r["id"])))
+    k = min(n_c3, len(pool))
+    chosen = {r["id"] for r in pool[:k]}
+    cutoff = pool[k - 1]["signals"]["c2_score"]
+
+    for r in rows:
+        r.setdefault("filters", {})["C2"] = r["id"] in chosen
+
+    _write_unified(rows, args.output)
+    print(f"[merge-c2] {len(rows)}건 → {args.output}")
+    print(f"  C1 풀(채점됨)={len(pool)}  |C3|={n_c3}  → C2={len(chosen)}건 "
+          f"(c2_score 컷오프 ≥ {cutoff})")
+    if k < n_c3:
+        print(f"  ⚠ 채점 풀({len(pool)}) < |C3|({n_c3}) — C2 가 {k}건으로 과소. 전체 채점 필요.")
+
+
 def cmd_make_crand(args):
     """C3 수량 통제군: C1 통과 풀에서 시드 고정 랜덤 |C3|개 → filters['C-rand']=True.
 
@@ -267,6 +312,11 @@ def main():
     m.add_argument("--cf", required=True, help="채점된 counterfactual json (metadata.counterfactual)")
     m.add_argument("--output", required=True)
     m.set_defaults(func=cmd_merge_c3)
+
+    m2 = sub.add_parser("merge-c2", help="범용 judge 상위 |C3|개 → C2 (크기 매칭)")
+    m2.add_argument("--unified", required=True, help="judge_general 으로 c2_score 채운 unified jsonl")
+    m2.add_argument("--output", required=True)
+    m2.set_defaults(func=cmd_merge_c2)
 
     c = sub.add_parser("make-crand", help="C1 풀에서 랜덤 |C3|개 → C-rand 수량 통제군")
     c.add_argument("--unified", required=True, help="merge-c3 완료된 unified jsonl")

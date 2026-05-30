@@ -5,7 +5,7 @@ Counterfactual Answer Probing 사전 계산기 (Inverse MATCHA).
   (1) wrong choice K 개 선택 (default K=1, 재현 가능한 seed)
   (2) 각 wrong_idx 마다 R1 에 "정답=wrong_idx 라는 전제로 CoT 작성" 요청
       → 인라인 TeacherRegenerator (forced 모드) 사용
-  (3) Solar G-Eval 로 "정당화 강도" 채점
+  (3) GPT-5 judge 로 "정당화 강도" 채점
       · 원본 CoT 는 target=gold 로 채점
       · CF CoT 는 target=해당 wrong 로 채점
   (4) metadata["counterfactual"] 에 적재:
@@ -48,18 +48,17 @@ from utils.data_loader import load_samples, save_samples
 from utils.schema import CoTSample
 
 
-def _make_judge(upstage_key: str | None, deepseek_key: str | None) -> tuple[object, str]:
-    """judge backend 자동 선택.
+def _make_judge() -> tuple[object, str]:
+    """judge backend = OpenAI GPT-5 (OPENAI_API_KEY).
 
-    UPSTAGE_API_KEY 가 있으면 Solar Pro 3 (원본 F8 인프라와 일치),
-    아니면 DeepSeek-Chat (싸고 빠름, R1 보다 채점 안정).
+    모델은 OPENAI_JUDGE_MODEL 환경변수로 override 가능(default "gpt-5").
     """
     from openai import OpenAI
-    if upstage_key:
-        return OpenAI(api_key=upstage_key, base_url="https://api.upstage.ai/v1"), "solar-pro3"
-    if deepseek_key:
-        return OpenAI(api_key=deepseek_key, base_url="https://api.deepseek.com"), "deepseek-chat"
-    raise RuntimeError("UPSTAGE_API_KEY 또는 DEEPSEEK_API_KEY 중 하나가 필요합니다 (G-Eval judge용).")
+    key = os.environ.get("OPENAI_API_KEY")
+    if not key:
+        raise RuntimeError("OPENAI_API_KEY 가 필요합니다 (GPT-5 judge용).")
+    model = os.environ.get("OPENAI_JUDGE_MODEL", "gpt-5")
+    return OpenAI(api_key=key), model
 
 
 _LETTERS = ["A", "B", "C", "D", "E"]
@@ -290,10 +289,7 @@ def run(
     if regen_only:
         judge_client, judge_model = None, "(regen-only: 채점 생략)"
     else:
-        judge_client, judge_model = _make_judge(
-            upstage_key=os.environ.get("UPSTAGE_API_KEY"),
-            deepseek_key=os.environ.get("DEEPSEEK_API_KEY"),
-        )
+        judge_client, judge_model = _make_judge()
     print(
         f"[counterfactual:precompute] judge backend = {judge_model}, "
         f"workers = {workers}, n_samples = {len(samples)}, regen_only = {regen_only}"
@@ -408,7 +404,7 @@ if __name__ == "__main__":
     p.add_argument("--workers", type=int, default=1,
                    help="동시 API 호출 쓰레드 수 (default 1=순차). 8~16 권장, rate-limit 초과 시 낮춰라.")
     p.add_argument("--regen-only", action="store_true",
-                   help="F6 1단계: 채점(judge) 생략, cf_cot 재생성만 수행. UPSTAGE/DEEPSEEK judge 키 불필요. "
+                   help="F6 1단계: 채점(judge) 생략, cf_cot 재생성만 수행. OPENAI judge 키 불필요. "
                         "채점은 별도 단계(GPT-5)에서. cf_score/orig_score 는 null 로 저장됨.")
     args = p.parse_args()
 
