@@ -11,6 +11,37 @@ student 정확도를 유지·향상시키는 것이 증거.
 비교군: **C0**(무필터) · **C1**(표준 baseline) · **C2**(C1+범용 Judge) · **C-rand**(C1 무작위 축소) · **C3**(C1+반사실).
 핵심: C3≥C1 / C3>C-rand / C3>C2.
 
+## 빠른 시작 (실행 순서)
+
+```bash
+# 0) 설치 + 키
+pip install torch transformers datasets openai tqdm langdetect peft
+pip install -U "llamafactory[torch,deepspeed,metrics]"
+export DEEPSEEK_API_KEY=...   # 생성(R1)
+export OPENAI_API_KEY=...     # judge(GPT-5)
+
+# 1) 전체 자동 (1~11단계, 산출물 있으면 건너뜀)
+bash scripts/run_pipeline.sh
+```
+
+수동으로 단계별 실행 순서 (자세한 명령은 아래 **파이프라인** 절):
+
+| 순서 | 무엇 | 실행 파일 / 명령 |
+|---|---|---|
+| 1 | R1 trace 생성 | `generate_traces.py` |
+| 2 | C0/C1 판정·통합 | `build_arms.py unified` |
+| 3 | C3 반사실: 생성→채점→merge | `counterfactual_adapter.py` → `precompute` → `build_arms.py merge-c3` |
+| 3.5 | **dev 임계값 보정**(선택, 권장) | `calibrate.py --auto` → `verify_thresholds.py` |
+| 4 | C2 범용 judge: 채점→merge | `judge_general.py` → `build_arms.py merge-c2` |
+| 5 | C-rand 수량 통제 | `build_arms.py make-crand` |
+| 6 | 학습 (arm×seed) | `train_lora.py` |
+| 7 | 평가 (test) | `evaluate.py` |
+| 8 | 통계 (mean±std/CI/McNemar) | `stats.py` |
+| 9 | 리포트 | `make_report.py` |
+
+> 모든 데이터는 `data/unified.jsonl` 한 파일에 누적되고, arm 은 학습 직전에 슬라이스된다.
+> **test split 로는 생성·보정하지 않는다**(평가 전용).
+
 ## 절대 규칙
 - **test split 에는 Teacher CoT 를 생성하지 않는다** — 최종 평가(정확도)에만. calibration/early-stop 은 dev.
 
@@ -89,7 +120,8 @@ utils/ configs/ scripts/ data/ results/
 |---|---|---|
 | [src/train/train_lora.py](src/train/train_lora.py) | arm×seed export→dataset 등록→LLaMA-Factory LoRA 학습(질문 마스킹, seq 4096) | `output/qwen3-8b-<arm>-s<seed>/` |
 | [src/eval/evaluate.py](src/eval/evaluate.py) | KorMedMCQA test 정답률(전체/과목별, resume) | `eval_*.jsonl` |
-| [src/eval/calibrate.py](src/eval/calibrate.py) | **dev** 로 반사실 임계값(gap/hedge/min_orig) 스윕 → reject율·신호분포 표(학습 없음, 값은 직접 선택) | `calibrate_dev.md` |
+| [src/eval/calibrate.py](src/eval/calibrate.py) | **dev** 반사실 임계값 스윕 표 + `--auto`(Otsu/GMM 비지도 컷 + 이봉성 진단 + 검증강도 권고) | `calibrate_dev.md` |
+| [src/eval/verify_thresholds.py](src/eval/verify_thresholds.py) | Path 3 검증 — 후보 컷 train→**dev ACC**(plan) + 분산체크·결정(analyze, 자동이동 X) | `verify_thresholds.json` |
 | [src/eval/stats.py](src/eval/stats.py) | seed mean±std + 부트스트랩 95% CI + McNemar 짝지은 검정 | `stats.json` |
 | [src/eval/sanity_zeroshot.py](src/eval/sanity_zeroshot.py) | base/distill zero-shot 하한 점검(학습 작동 확인) | `sanity_*.jsonl` |
 | [src/eval/compare_judges.py](src/eval/compare_judges.py) | judge 모델 동등성(ref vs cand) 검증 | `judge_compare.json` |
@@ -181,21 +213,37 @@ python src/dataset/build_arms.py merge-c3 \
 
 #### (보정) dev 로 임계값 고르기 — §3 "dev 로 임계값 보정 (test 로 맞추면 부정행위)"
 `gap/hedge/min_orig` 기본값(1.5 / 0.5 / 2.0)은 [configs/pipeline_config.yaml](configs/pipeline_config.yaml)에 박혀 있다.
-이를 **dev** 로 정당화·재선택하려면, train 과 동일하게 dev 의 CF 를 생성·채점한 뒤 스윕 표를 본다.
+이를 **dev** 로 정한다 — **gap 만 데이터로 자동 결정, hedge 는 보조로 둔다**(두 축 동시 자동컷은
+자유도가 늘고 이봉성 해석이 꼬여 논리가 약해짐). 방식은 **Path 3(비지도 컷 + ACC 수렴 확인)**:
+
 ```bash
-# dev CF 생성 → 채점 (train 과 동일 절차, --split dev)
-python src/filters/counterfactual_adapter.py --total -1 --split dev --workers 16 \
-  --output data/dev_cf.jsonl
-python -m filters.counterfactual.precompute --input data/dev_cf.jsonl \
-  --output data/dev_cf_judged.json --k 1 --workers 16
-# 임계값 스윕 표(학습 없음) — reject율·사유분해·신호분포를 보고 값을 직접 고른다
-python src/eval/calibrate.py --cf data/dev_cf_judged.json \
-  --gaps 1.0 1.25 1.5 1.75 2.0 --hedges none 0.0 0.5 1.0 --min-origs none 2.0 \
-  --output results/calibrate_dev.md
+# 0) dev CF 생성 → 채점 (train 과 동일 절차, --split dev)
+python src/filters/counterfactual_adapter.py --total -1 --split dev --workers 16 --output data/dev_cf.jsonl
+python -m filters.counterfactual.precompute --input data/dev_cf.jsonl --output data/dev_cf_judged.json --k 1 --workers 16
+
+# 1) 비지도 컷 + 이봉성 진단 + 검증강도 권고 (학습 없음) — 이게 '결정'
+python src/eval/calibrate.py --cf data/dev_cf_judged.json --auto --output results/calibrate_dev.md
+#   → Otsu/GMM 컷, 분리도(Cohen's d), 이봉 여부, 검증 후보 컷 목록, "ACC 검증 얼마나 해야 하나"
+
+# 2) 후보 컷 몇 개만 dev ACC 로 *확인* (풀스윕 X). 학습 포함이라 무거움 → 명령 생성 후 실행
+python src/eval/verify_thresholds.py plan --unified data/unified.jsonl --cf data/cf_judged.json \
+  --candidates 1.0 1.5 1.9 --unsup-cut 1.5 --seeds 42 43 --out-sh results/verify.sh
+bash results/verify.sh        # merge-c3(--gap)→export→train→dev eval, 마지막에 analyze 자동 실행
+
+# (analyze 단독 재실행)
+python src/eval/verify_thresholds.py analyze \
+  --cut 1.0 results/devacc_g1_s*.jsonl --cut 1.5 results/devacc_g1p5_s*.jsonl \
+  --cut 1.9 results/devacc_g1p9_s*.jsonl --unsup-cut 1.5
 # → 고른 값을 configs/pipeline_config.yaml 의 counterfactual 에 반영하고 §3-3(merge-c3) 재실행
 ```
-> 표만 출력하고 **최종값은 사람이 선택**한다(다운스트림 ACC 기반 자동 선택은 학습이 필요해 제외).
-> test split 로는 절대 보정하지 않는다.
+
+포지셔닝(중요 — 과장 금지):
+- **진짜 방어 논리는 "dev 에서 정하고 test 는 안 건드렸다"** 이다. 비지도 컷이 "객관적이라 더 옳다"가 아니다.
+- 비지도 컷(Otsu/GMM)은 *gap 분포의 분리점*이지 *ACC 최적 컷*이 아니다(feature 분리점 ≠ task 결정경계). 그 가치는 **작은 dev 라벨에 과적합하지 않으려는** robustness.
+- 그래서 **확인이지 튜닝이 아니다**: 비지도 컷을 결정으로 두고 ACC 로 *수렴만* 확인. ACC-best 로 컷을 옮기면 그건 (거친) dev 튜닝이므로 그렇게 *명시*해야 한다(analyze 가 경고).
+- **분산 체크**: 후보 컷들 ACC 차이가 seed noise 보다 작으면 "비지도 컷이 다른 것만큼 좋다"가 정직한 결론(이것도 방어됨).
+- **분리도가 검증강도를 조절**: 분리 강하면 골짜기 평평→ACC 둔감(가볍게), 약하면 컷 민감→ACC 확인이 값짐(seed↑). calibrate `--auto` 가 강도를 권고한다.
+- test split 로는 절대 보정하지 않는다.
 
 ### 4) C2 — 범용 LLM Judge(대조군) — §6.2 / H3
 ```bash

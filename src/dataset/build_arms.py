@@ -149,11 +149,22 @@ def _cf_id(sample) -> str | None:
 def cmd_merge_c3(args):
     """채점된 counterfactual 파일에 CounterfactualFilter 를 적용해 filters.C3 채움.
 
-    C3 = C1 통과 AND counterfactual 통과. run.py 의 판정 로직을 그대로 재사용한다
-    (gap/hedge/min_orig_score + on_missing 정책은 pipeline_config.yaml 에서 읽음).
+    C3 = C1 통과 AND counterfactual 통과. run.py 의 판정 로직을 그대로 재사용한다.
+    임계값(gap/hedge/min_orig)은 기본적으로 pipeline_config.yaml 에서 읽되, --gap/--hedge/
+    --min-orig 로 override 할 수 있다(임계값 검증 verify_thresholds.py 가 후보 컷별 arm 을
+    만들 때 사용). on_missing 정책은 config.
     채점 파일에 없는 샘플의 C3 는 None(판정 보류) — cf 채점이 아직 안 된 샘플.
     """
     from filters.counterfactual.run import CounterfactualFilter
+
+    flt = CounterfactualFilter(
+        gap_threshold=args.gap,
+        hedge_gap_threshold=args.hedge,
+        min_orig_score=args.min_orig,
+    )
+    if any(v is not None for v in (args.gap, args.hedge, args.min_orig)):
+        print(f"[merge-c3] 임계값 override: gap={flt.gap_threshold} "
+              f"hedge={flt.hedge_gap_threshold} min_orig={flt.min_orig_score}")
 
     samples = load_samples(args.cf)
     cf_seen, no_idx = set(), 0
@@ -163,7 +174,7 @@ def cmd_merge_c3(args):
             no_idx += 1
             continue
         cf_seen.add(rid)
-    passed = CounterfactualFilter().run(samples, verbose=True)
+    passed = flt.run(samples, verbose=True)
     cf_pass = {rid for s in passed if (rid := _cf_id(s)) is not None}
 
     rows = _read_unified(args.unified)
@@ -311,6 +322,9 @@ def main():
     m.add_argument("--unified", required=True, help="cmd_unified 출력 jsonl")
     m.add_argument("--cf", required=True, help="채점된 counterfactual json (metadata.counterfactual)")
     m.add_argument("--output", required=True)
+    m.add_argument("--gap", type=float, default=None, help="gap 임계값 override (생략=config)")
+    m.add_argument("--hedge", type=float, default=None, help="hedge_gap 임계값 override (생략=config)")
+    m.add_argument("--min-orig", type=float, default=None, help="min_orig_score override (생략=config)")
     m.set_defaults(func=cmd_merge_c3)
 
     m2 = sub.add_parser("merge-c2", help="범용 judge 상위 |C3|개 → C2 (크기 매칭)")
