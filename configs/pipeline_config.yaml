@@ -1,140 +1,18 @@
-# KoMED-CoT-Filtering 파이프라인 설정
-#
-# 필터 구조:
-#   PRE       (항상 적용)              : correctness(①) → structure(②)
-#   Ablation  (Step 1 독립 + Step 2 조합): kppl(③), step_coverage(④), answer_consistency(⑤)
-#   Proposal  (Ablation 뒤 별도 단계)    : think_final_divergence(⑥)  ← 본 연구 핵심 기여(C2 vs C3)
-#   TAIL      (항상 적용)              : judge(⑦)
+# 필터 파라미터.
+# 현재 코드가 실제로 읽는 건 proposal_filters.counterfactual (C3) 뿐이다.
+# C1(정답/가독성/형식/길이)·C2(judge_general)는 구현 시 여기에 섹션을 추가한다.
 
-# ── Teacher 설정 ──────────────────────────────────────────────────────────────
-teacher:
-  # Teacher 모델 — DeepSeek-R1 확정 (reasoning 모델, <think> 블록 출력)
-  # <think> 블록 출력은 ⑥ Think-Final Divergence 필터의 작동 전제다.
-  model: "deepseek-r1"
-  # Phase 0 파이럿 샘플 수
-  pilot_size: 300
-  # Contamination 징후 측정용 (오답률이 지나치게 낮으면 제외 근거)
-  contamination_check_model: "gpt-5"
-  contamination_check_size: 50
+# ── C1 표준 baseline (DeepSeek-R1 2501.12948 정제 절차, 고정값) ──
+#   correctness / readability(혼합언어·가독성) / structure(형식·파싱) / length
+#   — 현재 코드는 config 미사용. judge_general(C2) 포함 구현 시 여기에 노출.
 
-# ── PRE 필터 (항상 적용, Ablation 대상 아님) ──────────────────────────────────
-pre_filters:
-
-  correctness:  # ① Teacher Correctness
-    enabled: true
-    # 구현: 정규식으로 "정답: X" 파싱 후 gold answer 비교
-
-  structure:    # ② Structure Format
-    enabled: true
-    required_step_labels: ["[Step 1]", "[Step 2]", "[Step 3]", "[Step 4]"]
-    answer_line_pattern: "정답: [ABCDE]"
-
-# ── Ablation 대상 필터 (Step 1 독립 측정 + Step 2 조합 실험) ────────────────────
-ablation_filters:
-
-  kppl:         # ③ K-PPL Band-pass
-    enabled: true
-    model_name: "LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct"
-    low_threshold: 2.5    # 이하 → 단순 반복 의심 → 제거 (n=273 (Rej, δ) 스윕: δ_min=+0.117, rej 2.9% — 이전 3.5는 δ_min=-0.088로 좋은 샘플을 제거)
-    high_threshold: 7.0   # 이상 → 비문/번역체 → 제거 (273개 GPU 실측 p90=6.50; 현행 7.0은 p90 초과분만 제거하는 보수값) — high-only 스윕 미수행: python scripts/sweep_thresholds.py --filter kppl --param high_threshold --values 5.5 6.0 6.5 7.0 7.5 8.0 --input data/filtered/02_after_structure.json --output_dir results/ablation/sweep/
-    device: "cuda"
-    max_length: 2048
-    stride: 512
-
-  step_coverage:    # ④ Step Coverage (5지선다 커버리지 + Step별 밀도)
-    enabled: true
-    coverage_threshold: 0.4   # Step 3에서 A~E 중 40% 이상 언급 시 통과 — DeepSeek-R1 재보정: GPT-4/4o 기준 0.6이 13% 거부율 유발, judge J-gap=-0.054로 불일치 확인 → 0.4(2/5)로 하향, 목표 Rej%≈6%
-    min_tokens:               # Step별 최소 공백 분리 토큰 수 — DeepSeek-R1 생성 패턴 재보정 (스윕: sweep_thresholds.py --filter step_coverage --param min_tokens.step3 --values 15 20 25 30 35 40)
-      step1: 8                # <8:  문제 재진술 one-liner 제거 (GPT-4/4o 실측 최솟값 8tok — 이전 10은 9tok 정상 샘플 제거)
-      step2: 15               # <15: ~0%   — 안전망 (유지)
-      step3: 25               # <25: 5지선다 최소 기술 미달 제거 (이전 40은 judge 불일치 13% 과다 거부 → 목표 ~6%에 맞춰 하향)
-      step4: 15               # <15: ~0%   — 안전망 (유지)
-
-  answer_consistency:  # ⑤ Answer Consistency
-    enabled: true
-    entailment_threshold: 0.65  # 미만 → 탈락. 0.65로 상향: score=0.6(불확실/명시 없음)도 탈락, score≥0.8(명시 확인)만 통과
-
-# ── 제안 층위 필터 (본 연구 핵심 기여 — Ablation 뒤 별도 단계로 적용) ──────────
-# C2(최적 Ablation 조합) vs C3(C2 + F7) Student 다운스트림 성능으로 효과 검증.
+# ── C3 — 반사실 충실성 필터 (Inverse-MATCHA). filters/counterfactual/run.py 가 읽음 ──
 proposal_filters:
-
-  prism:  # ⑦ PRISM — MATCHA 교란 안정성 (C2 vs C3)
-    enabled: true
-    mode: "api_probe"           # "heuristic" | "api_probe"
-    stability_threshold: 0.5   # 미만 → fragile → 탈락
-    n_perturb: 3
-    temperature: 0.6
-    perturbation_strategies:
-      - distractor_inject
-      - choice_order_swap
-      - stem_marker
-    probe_base_url: "https://api.deepseek.com"
-    probe_model: "deepseek-reasoner"
-    # api_key는 환경변수 DEEPSEEK_API_KEY에서 자동 로드
-    hedge_spike_threshold: 5.0
-
-  think_final_divergence:  # ⑥ Think-Final Divergence (추론 충실성)
-    enabled: true
-    # 임계값: 02_after_structure.json (n=273) 실측 분포 기반
-    # hedge p95=8 → 10 (보수적), gap p95=2.04 → 2.0 / OR 조합 탈락율 7.7%
-    hedge_threshold: 10     # <think> 내 한국어 hedge 표지 수 (≥10 → 탈락)
-    gap_threshold: 2.0      # think vs Step4 hedge 밀도 격차 per 100 words (≥2.0 → 탈락)
-
-  counterfactual:  # ⑧ Counterfactual Answer Probing (Inverse MATCHA)
-    # 전제: filters/counterfactual/precompute.py 를 먼저 돌려 metadata["counterfactual"] 에
-    #       원본 정당화 점수 + wrong-answer counterfactual 정당화 점수를 적재해 둘 것.
-    # 판정: gap = orig_score - max(cf_score). gap 이 작으면 어떤 답이든 똑같이
-    #       정당화되는 사후합리화로 보고 탈락.
-    # 안전망: min_orig_score — 원본 CoT 가 gold 를 거의 정당화 못하면(orig_score < 임계값)
-    #         gap/hedge 판정과 무관하게 무조건 탈락 (독립 OR).
+  counterfactual:  # Counterfactual Answer Probing
+    # 전제: precompute.py 로 metadata["counterfactual"](orig_score + wrong-answer cf_score) 적재 후 판정.
+    # 판정: gap = orig_score - max(cf_score). 작으면(어떤 답이든 비슷하게 정당화) 사후합리화로 탈락.
     enabled: true
     gap_threshold: 1.5         # gap < 1.5 → judge 단독 의심 신호
-    min_orig_score: 2.0        # orig_score < 2.0 → 독립 안전망(OR)으로 탈락 (gold 정당화 실패 수준)
-                               # null 로 두면 안전망 비활성. orig_score 는 1~5 스케일.
-    hedge_gap_threshold: 0.5   # AND-rule (보수적): gap 의심 AND hedge_gap>=0.5 일 때만 탈락
-                               # n=258 실측 분포에서 +0.5 이상은 25.6% — 사후합리화 신호가
-                               # 명확히 양수일 때만 탈락 처리. 양쪽 hedge=0/0 (스타일적
-                               # 무hedge) 는 통과시킴.
-                               # 탈락률: gap 단독 56.2% → AND-rule(0.5) ~23% (33%p 완화)
-                               # hedge_gap << 0 = CF 가 hedge 폭증 = R1 망설임 = robust → rescue
+    min_orig_score: 2.0        # orig_score < 2.0 → 독립 안전망(OR)으로 탈락. null=비활성 (1~5 스케일)
+    hedge_gap_threshold: 0.5   # AND-rule: gap 의심 AND hedge_gap>=0.5 일 때만 탈락 (gap 단독 over-reject 완화)
     on_missing: "pass"         # precompute 누락 시 정책: "pass" | "fail"
-
-  matcha:  # ⑦ MATCHA — Answer-Conditioned Input Perturbation
-    # 전제: filters/matcha/precompute.py 를 먼저 돌려 metadata["matcha"]에
-    #       토큰 차원 + paraphrase 교란 결과를 적재해 두어야 한다.
-    # 본 필터는 추가 API 호출 없이 적재 결과만 읽어 fragility 를 판정한다.
-    # 판정 신호 3종은 OR 결합 (제안서 §5 "verbosity/hedge" + answer flip).
-    enabled: true
-    answer_flip_threshold: 0.5     # 정답 고정 prompt 인데도 perturbed CoT 가 다른 선지로 결론낸 비율 (≥0.5 → 탈락)
-    hedge_gap_threshold: 2.0       # perturbed CoT 의 hedge 밀도 - 원본 hedge 밀도 최댓값 (≥2.0 → 탈락)
-    verbosity_ratio_threshold: 1.5 # perturbed CoT 단어수 / 원본 단어수 최댓값 (≥1.5 → 탈락, 사후 합리화 팽창 신호)
-    min_perturbations: 1           # 최소 유효 perturbation 수 (미만이면 on_missing 정책 적용)
-    on_missing: "pass"             # precompute 누락 시 정책: "pass" 통과 | "fail" 탈락
-    # precompute 시 --semantic-judge 옵션을 켜면 §6.3-3 의미보존 검사가 활성화되며,
-    # semantic_preserved=False 인 perturbation 은 본 필터의 detector 에서 자동 제외된다.
-
-# ── TAIL 필터 (항상 적용, Ablation 대상 아님) ─────────────────────────────────
-tail_filters:
-
-  judge:        # ⑦ LLM-as-a-Judge (Solar Pro 3, G-Eval)
-    # 모델은 filters/judge/score_faithfulness.py 의 SOLAR_MODEL (기본 "solar-pro3") 에서 고정.
-    # 차원은 같은 파일의 DIM_ORDER (step_coherence, korean_fluency, step_coverage) 에서 고정.
-    enabled: true
-    temperature: 0.3
-    n_eval_per_sample: 3   # 차원별 3회 평가 후 평균 (편향 완화)
-    min_score_threshold: 3.0
-
-# ── Ablation Study 설정 (Phase 3) ─────────────────────────────────────────────
-ablation:
-  # 파이럿 샘플 수 — 100개는 통계적으로 빠듯, 200~300 권장 (계획서 경고)
-  pilot_size: 200
-  # Jaccard 중복도 기준 (계획서 §6)
-  overlap_complement_threshold: 0.2   # 미만 → 상호 보완적
-  overlap_redundant_threshold: 0.4    # 이상 → 중복 심각
-  # Cliff's δ Bootstrap CI 반복 횟수 (보고서 §6)
-  bootstrap_n: 10000
-  significance_level: 0.05
-
-# ── 평가 설정 ──────────────────────────────────────────────────────────────────
-evaluation:
-  output_dir: "results/"
