@@ -17,7 +17,7 @@ lora_rank: 32
 lora_alpha: 64
 lora_dropout: 0.05
 lora_target: all
-# quantization_bit: 4        # ← T4/V100(16GB) 이면 주석 해제 (QLoRA)
+quantization_bit: 4          # QLoRA — Colab 16GB(T4/V100)용. 24GB+ 면 주석 처리해 plain LoRA 로.
 
 ### dataset
 dataset: komed_nofilter

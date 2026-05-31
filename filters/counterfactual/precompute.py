@@ -377,19 +377,30 @@ def run_existing_cf(
         }
         return i, sample
 
+    def _log_sample(sample: CoTSample) -> None:
+        cf = sample.metadata.get("counterfactual", {})
+        cfs = cf.get("counterfactuals", [])
+        cf_scores = [c.get("cf_score") for c in cfs if c.get("cf_score") is not None]
+        cf_errs = [c.get("error") for c in cfs if c.get("error")]
+        msg = (f"[counterfactual:precompute] {len(results)}/{len(cf_rows)} "
+               f"id={sample.id} orig={cf.get('orig_score')} cf_scores={cf_scores}")
+        if cf_errs:
+            msg += f" ERROR={'; '.join(str(e) for e in cf_errs)}"
+        print(msg)
+
     results: dict[int, CoTSample] = {}
     if workers <= 1:
         for i in range(len(cf_rows)):
             idx, sample = _make_sample_and_result(i)
             results[idx] = sample
-            print(f"[counterfactual:precompute] {len(results)}/{len(cf_rows)} id={sample.id}")
+            _log_sample(sample)
     else:
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = [pool.submit(_make_sample_and_result, i) for i in range(len(cf_rows))]
             for fut in as_completed(futures):
                 idx, sample = fut.result()
                 results[idx] = sample
-                print(f"[counterfactual:precompute] {len(results)}/{len(cf_rows)} id={sample.id}")
+                _log_sample(sample)
     ckpt_f.close()
 
     save_samples([results[i] for i in range(len(cf_rows))], output_path)
