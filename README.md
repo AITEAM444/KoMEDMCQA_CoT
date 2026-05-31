@@ -227,17 +227,23 @@ python -m filters.counterfactual.precompute --input data/dev_cf.jsonl --output d
 python src/eval/calibrate.py --cf data/dev_cf_judged.json --auto --output results/calibrate_dev.md
 #   → Otsu/GMM 컷, 분리도(Cohen's d), 이봉 여부, 검증 후보 컷 목록, "ACC 검증 얼마나 해야 하나"
 
-# 2) 후보 컷 몇 개만 dev ACC 로 *확인* (풀스윕 X). 학습 포함이라 무거움 → 명령 생성 후 실행
+# 2) 후보 컷 2개를 dev ACC 로 *확인* (풀스윕 X). 학습 포함이라 무거움 → 명령 생성 후 실행
+#    seed 2개 고정(--seeds 42 43): noise 추정에 필요한 최소선. 후보2 × seed2 = LoRA 4회 학습.
+#    (후보값 1.5 / 1.9 는 예시 — calibrate --auto 가 낸 비지도 컷 + 후보 1개로 채운다.)
 python src/eval/verify_thresholds.py plan --unified data/unified.jsonl --cf data/cf_judged.json \
-  --candidates 1.0 1.5 1.9 --unsup-cut 1.5 --seeds 42 43 --out-sh results/verify.sh
-bash results/verify.sh        # merge-c3(--gap)→export→train→dev eval, 마지막에 analyze 자동 실행
+  --candidates 1.5 1.9 --unsup-cut 1.5 --seeds 42 43 --out-sh results/verify.sh
+bash results/verify.sh        # merge-c3(--gap)→export→train(seed 42·43)→dev eval, 마지막에 analyze 자동 실행
 
-# (analyze 단독 재실행)
+# (analyze 단독 재실행) — _tag(): 1.5→g1p5, 1.9→g1p9
 python src/eval/verify_thresholds.py analyze \
-  --cut 1.0 results/devacc_g1_s*.jsonl --cut 1.5 results/devacc_g1p5_s*.jsonl \
-  --cut 1.9 results/devacc_g1p9_s*.jsonl --unsup-cut 1.5
+  --cut 1.5 results/devacc_g1p5_s*.jsonl --cut 1.9 results/devacc_g1p9_s*.jsonl --unsup-cut 1.5
 # → 고른 값을 configs/pipeline_config.yaml 의 counterfactual 에 반영하고 §3-3(merge-c3) 재실행
 ```
+
+> **seed 2개 고정의 이유**: verify_thresholds 의 결정 로직(`spread ≤ noise` 평탄 판정, best vs 비지도컷
+> 결합-std 비교)이 **seed 분산 추정에 의존**한다. seed 1개면 std=0 → noise=0 이 되어 모든 차이가 거짓으로
+> "유의미"해진다(analyze 가 `⚠ seed 1개뿐 → 분산 추정 불가` 경고). 2개가 std(n=2)를 얻는 최소선이라
+> 1→2 의 가치 점프가 가장 크다. 3개는 std 를 더 안정화하지만 비용 +50%(=학습 6회). 비용 제약상 **2개로 고정**.
 
 포지셔닝(중요 — 과장 금지):
 - **진짜 방어 논리는 "dev 에서 정하고 test 는 안 건드렸다"** 이다. 비지도 컷이 "객관적이라 더 옳다"가 아니다.
