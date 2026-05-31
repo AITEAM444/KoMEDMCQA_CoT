@@ -22,3 +22,7 @@ venv/
 
 # env
 .env
+
+# API 키 목록 (절대 커밋 금지)
+keys.txt
+keys*.txt
