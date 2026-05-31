@@ -4,7 +4,7 @@
 실제 학습은 LLaMA-Factory(configs/train.yaml)가 수행하고, 이 스크립트는
 
   1. build_arms export 로 arm 별 SFT jsonl 생성 (data-dir/train_<arm>.jsonl)
-  2. configs/dataset_info.json 에 komed_<arm> 항목 자동 등록
+  2. data-dir/dataset_info.json 에 komed_<arm> 항목 자동 등록 (LLaMA-Factory 가 dataset_dir 안에서 찾음)
   3. (arm, seed) 마다 llamafactory-cli train 을 dataset/output_dir/seed/data_seed 오버라이드로 실행
      (seed=가중치 초기화·드롭아웃, data_seed=데이터 셔플/배치 순서 — 둘 다 같은 시드로 묶어 독립 run 보장)
 
@@ -29,7 +29,6 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[2]
 _BUILD_ARMS = _ROOT / "src" / "dataset" / "build_arms.py"
-_DATASET_INFO = _ROOT / "configs" / "dataset_info.json"
 _SHAREGPT_ENTRY = {
     "formatting": "sharegpt",
     "columns": {"messages": "messages"},
@@ -49,10 +48,12 @@ def export_arm(unified: Path, arm: str, data_dir: Path, dry: bool) -> Path:
 
 
 def register_dataset(arm: str, data_path: Path, dataset_dir: Path, dry: bool) -> str:
-    """dataset_info.json 에 komed_<arm> 등록(없으면 추가). LLaMA-Factory 가 dataset_dir 기준
-    상대 file_name 을 찾으므로 data_path 를 dataset_dir 기준 상대경로로 기록한다."""
+    """dataset_info.json 에 komed_<arm> 등록(없으면 추가). LLaMA-Factory 는 train_one 에서
+    넘기는 dataset_dir 안에서 dataset_info.json 을 찾으므로, 그 파일을 dataset_dir 에 쓰고
+    file_name 은 dataset_dir 기준 상대경로로 기록한다(같은 디렉터리이므로 보통 파일명만)."""
     name = f"komed_{arm.lower().replace('-', '_')}"
-    info = json.loads(_DATASET_INFO.read_text(encoding="utf-8")) if _DATASET_INFO.exists() else {}
+    info_path = dataset_dir / "dataset_info.json"
+    info = json.loads(info_path.read_text(encoding="utf-8")) if info_path.exists() else {}
     try:
         rel = str(data_path.resolve().relative_to(dataset_dir.resolve()))
     except ValueError:
@@ -60,9 +61,9 @@ def register_dataset(arm: str, data_path: Path, dataset_dir: Path, dry: bool) ->
     entry = {"file_name": rel, **_SHAREGPT_ENTRY}
     if info.get(name) != entry:
         info[name] = entry
-        print(f"[train] dataset_info 등록: {name} → {rel}")
+        print(f"[train] dataset_info 등록: {name} → {rel}  ({info_path})")
         if not dry:
-            _DATASET_INFO.write_text(json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8")
+            info_path.write_text(json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8")
     return name
 
 
