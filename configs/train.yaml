@@ -1,5 +1,7 @@
-# Qwen3-8B LoRA SFT — no-filter 베이스라인 (Colab 단일 GPU)
-# 실행:  llamafactory-cli train configs/train/qwen3_8b_lora_nofilter.yaml
+# Qwen3-8B LoRA SFT — train_lora.py 의 기본 base config (Colab 단일 GPU)
+# train_lora.py 가 arm·시드별로 dataset/output_dir/seed 를 덮어써서 호출한다.
+# 단독 실행(덮어쓰기 없이) 시 dataset=komed_c0(=C0)로 동작:
+#   llamafactory-cli train configs/train.yaml
 #
 # GPU별:
 #   A100 40GB  → 이대로 (plain LoRA, bf16 base 16GB + adapter)
@@ -19,8 +21,8 @@ lora_dropout: 0.05
 lora_target: all
 quantization_bit: 4          # QLoRA — Colab 16GB(T4/V100)용. 24GB+ 면 주석 처리해 plain LoRA 로.
 
-### dataset
-dataset: komed_nofilter
+### dataset  (train_lora.py 가 arm 별로 dataset 키를 덮어쓴다; 단독 실행 시 C0 기본)
+dataset: komed_c0
 dataset_dir: data/sft
 template: qwen3              # 구버전 LLaMA-Factory면 qwen
 cutoff_len: 4096            # Colab 안전값. A100 40GB면 8192 가능(긴 50건 잘림 방지)

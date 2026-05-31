@@ -137,7 +137,8 @@ utils/ configs/ scripts/ data/ results/
 | [utils/data_loader.py](utils/data_loader.py) | jsonl/json ↔ `CoTSample` 로더 |
 | [src/data/load_kormedmcqa.py](src/data/load_kormedmcqa.py) | KorMedMCQA 선지 join 유틸 |
 | [configs/pipeline_config.yaml](configs/pipeline_config.yaml) | C1 임계값(`c1_filters`) + C3 `gap/hedge/min_orig` |
-| `configs/train.yaml`, `qwen3_8b_*.yaml`, `ds_zero3.json`, `dataset_info.json` | LLaMA-Factory 학습/데이터 설정 |
+| [configs/train.yaml](configs/train.yaml) | **유일한 학습 base**(LoRA). `train_lora.py` 가 arm·시드별로 `dataset`/`output_dir`/`seed`/`data_seed` 만 덮어써 호출. 단독 실행 시 `komed_c0`(=C0). (옛 `qwen3_8b_*.yaml` 변형들은 제거 — 전용 arm config 불필요) |
+| `configs/ds_zero3.json`, `data/sft/dataset_info.json` | DeepSpeed ZeRO-3 / arm 데이터셋 등록(`komed_c0`~`komed_crand`) |
 | `data/`, `results/` | 데이터·체크포인트 (`.gitignore`) |
 
 ## 환경
@@ -287,9 +288,13 @@ python src/dataset/build_arms.py export --input data/unified.jsonl --arm C3 \
 ```bash
 # src/train/train_lora.py : 각 arm 을 export→dataset 등록→LLaMA-Factory(configs/train.yaml)로
 #   LoRA 학습(질문 마스킹, seq 4096). 단일 run 노이즈 통제 위해 최소 3 seed.
-python src/train/train_lora.py --unified data/unified.jsonl \
+#   base config 은 train.yaml 하나뿐(전용 arm yaml 없음). arm 별로 dataset=komed_<arm> 을,
+#   시드별로 seed 와 data_seed 를 함께 덮어쓴다(가중치 초기화·드롭아웃 + 데이터 셔플 순서 = 독립 run).
+python src/train/train_lora.py --unified data/filtered/unified.jsonl \
   --arms C0 C1 C2 C3 C-rand --seeds 42 43 44
-#   먼저 명령만 확인:  ... --arms C3 --seeds 42 --dry-run
+#   개별 arm 만:        ... --arms C0 --seeds 42 43 44   (arms×seeds 곱만큼 순차 실행)
+#   먼저 명령만 확인:    ... --arms C3 --seeds 42 --dry-run
+#   단독(래퍼 없이 1회): llamafactory-cli train configs/train.yaml   (dataset=komed_c0 → C0)
 # → output/qwen3-8b-<arm>-s<seed>/  (LoRA adapter)
 ```
 

@@ -5,7 +5,8 @@
 
   1. build_arms export 로 arm 별 SFT jsonl 생성 (data-dir/train_<arm>.jsonl)
   2. configs/dataset_info.json 에 komed_<arm> 항목 자동 등록
-  3. (arm, seed) 마다 llamafactory-cli train 을 dataset/output_dir/seed 오버라이드로 실행
+  3. (arm, seed) 마다 llamafactory-cli train 을 dataset/output_dir/seed/data_seed 오버라이드로 실행
+     (seed=가중치 초기화·드롭아웃, data_seed=데이터 셔플/배치 순서 — 둘 다 같은 시드로 묶어 독립 run 보장)
 
 loss 는 train.yaml 설정(질문 마스킹 = sharegpt user 턴 미학습, assistant 만 학습)을
 그대로 따른다. seq 4096 도 train.yaml(cutoff_len).
@@ -69,7 +70,7 @@ def train_one(config: Path, dataset: str, dataset_dir: Path, output_dir: Path,
               seed: int, extra: list[str], dry: bool) -> None:
     cmd = ["llamafactory-cli", "train", str(config),
            f"dataset={dataset}", f"dataset_dir={dataset_dir}",
-           f"output_dir={output_dir}", f"seed={seed}", *extra]
+           f"output_dir={output_dir}", f"seed={seed}", f"data_seed={seed}", *extra]
     print(f"[train] $ {' '.join(cmd)}")
     if not dry:
         subprocess.run(cmd, check=True)
