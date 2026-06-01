@@ -1,0 +1,110 @@
+nohup: ignoring input
+===== C1 seed=42 start =====
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/399 [00:00<?, ?it/s]Loading weights:   1%|          | 2/399 [00:00<00:44,  8.87it/s]Loading weights:   7%|▋         | 26/399 [00:00<00:03, 97.87it/s]Loading weights:  11%|█         | 43/399 [00:00<00:02, 120.34it/s]Loading weights:  15%|█▌        | 61/399 [00:00<00:02, 134.01it/s]Loading weights:  20%|██        | 81/399 [00:00<00:02, 153.60it/s]Loading weights:  25%|██▍       | 98/399 [00:00<00:01, 157.49it/s]Loading weights:  29%|██▉       | 115/399 [00:00<00:01, 161.22it/s]Loading weights:  34%|███▍      | 136/399 [00:00<00:01, 170.08it/s]Loading weights:  39%|███▊      | 154/399 [00:01<00:01, 169.21it/s]Loading weights:  43%|████▎     | 172/399 [00:01<00:01, 164.01it/s]Loading weights:  48%|████▊     | 192/399 [00:01<00:01, 168.56it/s]Loading weights:  53%|█████▎    | 213/399 [00:01<00:01, 175.74it/s]Loading weights:  58%|█████▊    | 231/399 [00:01<00:00, 174.12it/s]Loading weights:  62%|██████▏   | 249/399 [00:01<00:00, 168.28it/s]Loading weights:  67%|██████▋   | 269/399 [00:01<00:00, 171.41it/s]Loading weights:  73%|███████▎  | 290/399 [00:01<00:00, 178.48it/s]Loading weights:  77%|███████▋  | 308/399 [00:01<00:00, 174.22it/s]Loading weights:  82%|████████▏ | 326/399 [00:02<00:00, 170.62it/s]Loading weights:  87%|████████▋ | 346/399 [00:02<00:00, 174.24it/s]Loading weights:  92%|█████████▏| 367/399 [00:02<00:00, 179.96it/s]Loading weights:  97%|█████████▋| 386/399 [00:02<00:00, 176.91it/s]Loading weights: 100%|██████████| 399/399 [00:02<00:00, 161.46it/s]
+[eval] LoRA adapter 로드: ./c1_adapters/qwen3-8b-c1-s42
+⚠ test split 사용 — Phase 1 Teacher CoT 생성에는 금지 (보고서 §2).
+데이터 로딩 중... (split=test)
+- dentist: 811건
+- doctor: 435건
+- nurse: 878건
+- pharm: 885건
+[eval] test 3009건 | 완료 1824 건너뜀, 신규 1185건 (model=Qwen/Qwen3-8B, lora=./c1_adapters/qwen3-8b-c1-s42)
+[transformers] The following generation flags are not valid and may be ignored: ['top_k']. Set `TRANSFORMERS_VERBOSITY=info` for more details.
+Traceback (most recent call last):
+  File "/workspace/KoMEDMCQA_CoT/src/eval/evaluate.py", line 162, in <module>
+    main()
+  File "/workspace/KoMEDMCQA_CoT/src/eval/evaluate.py", line 129, in main
+    gen = model.generate(
+          ^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/peft/peft_model.py", line 2048, in generate
+    outputs = self.base_model.generate(*args, **kwargs)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/torch/utils/_contextlib.py", line 124, in decora[eval] +272/1425 (누적 1856, 정답 1239)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/transformers/generation/utils.py", line 2543, in generate
+    result = decoding_method(
+             ^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/transformers/generation/utils.py", line 2750, in _sample
+    outputs = model_forward(**model_inputs, return_dict=True)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1779, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1790, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/transformers/utils/generic.py", line 887, in wrapper
+    output = func(self, *args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/transformers/models/qwen3/modeling_qwen3.py", line 492, in forward
+    outputs: BaseModelOutputWithPast = self.model(
+                                       ^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1779, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1790, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/transformers/utils/generic.py", line 963, in wrapper
+    output = func(self, *args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/transformers/utils/output_capturing.py", line 248, in wrapper
+    outputs = func(self, *args, **kwargs)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/transformers/models/qwen3/modeling_qwen3.py", line 424, in forward
+    hidden_states = decoder_layer(
+                    ^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/transformers/modeling_layers.py", line 93, in __call__
+    return super().__call__(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1779, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1790, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/transformers/models/qwen3/modeling_qwen3.py", line 318, in forward
+    hidden_states, _ = self.self_attn(
+                       ^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1779, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1790, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/transformers/models/qwen3/modeling_qwen3.py", line 277, in forward
+    attn_output, attn_weights = attention_interface(
+                                ^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/transformers/integrations/sdpa_attention.py", line 60, in sdpa_attention_forward
+    value = repeat_kv(value, module.num_key_value_groups)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/transformers/integrations/sdpa_attention.py", line 25, in repeat_kv
+    return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 308.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 177.56 MiB is free. Process 259129 has 25.50 GiB memory in use. Process 292888 has 43.36 GiB memory in use. Process 374413 has 24.03 GiB memory in use. Of the allocated memory 21.33 GiB is allocated by PyTorch, and 1.93 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)
+[eval fail] s42
+[main 33df6a6] C1 test result s42
+ 1 file changed, 16 insertions(+)
+error: cannot pull with rebase: You have unstaged changes.
+error: Please commit or stash them.
+To https://github.com/AITEAM444/KoMEDMCQA_CoT.git
+ ! [rejected]        main -> main (non-fast-forward)
+error: failed to push some refs to 'https://github.com/AITEAM444/KoMEDMCQA_CoT.git'
+hint: Updates were rejected because the tip of your current branch is behind
+hint: its remote counterpart. If you want to integrate the remote changes,
+hint: use 'git pull' before pushing again.
+hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+[push fail] s42
+===== C1 seed=43 start =====
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/399 [00:00<?, ?it/s]Loading weights:   1%|          | 2/399 [00:00<00:40,  9.70it/s]Loading weights:   6%|▋         | 25/399 [00:00<00:03, 98.81it/s]Loading weights:  11%|█         | 43/399 [00:00<00:02, 126.81it/s]Loading weights:  15%|█▌        | 60/399 [00:00<00:02, 139.41it/s]Loading weights:  20%|██        | 81/399 [00:00<00:02, 156.23it/s]Loading weights:  25%|██▍       | 98/399 [00:00<00:01, 160.32it/s]Loading weights:  29%|██▉       | 116/399 [00:00<00:01, 159.98it/s]Loading weights:  34%|███▍      | 137/399 [00:00<00:01, 171.13it/s]Loading weights:  40%|███▉      | 158/399 [00:01<00:01, 177.48it/s]Loading weights:  44%|████▍     | 177/399 [00:01<00:01, 179.40it/s]Loading weights:  49%|████▉     | 196/399 [00:01<00:01, 174.19it/s]Loading weights:  54%|█████▎    | 214/399 [00:01<00:01, 172.59it/s]Loading weights:  59%|█████▉    | 235/399 [00:01<00:00, 179.78it/s]Loading weights:  64%|██████▎   | 254/399 [00:01<00:00, 178.39it/s]Loading weights:  68%|██████▊   | 272/399 [00:01<00:00, 172.37it/s]Loading weights:  73%|███████▎  | 291/399 [00:01<00:00, 173.28it/s]Loading weights:  78%|███████▊  | 312/399 [00:01<00:00, 177.02it/s]Loading weights:  83%|████████▎ | 330/399 [00:02<00:00, 174.83it/s]Loading weights:  87%|████████▋ | 348/399 [00:02<00:00, 170.04it/s]Loading weights:  92%|█████████▏| 368/399 [00:02<00:00, 174.42it/s]Loading weights:  97%|█████████▋| 389/399 [00:02<00:00, 180.08it/s]Loading weights: 100%|██████████| 399/399 [00:02<00:00, 164.89it/s]
+[eval] LoRA adapter 로드: ./c1_adapters/qwen3-8b-c1-s43
+⚠ test split 사용 — Phase 1 Teacher CoT 생성에는 금지 (보고서 §2).
+데이터 로딩 중... (split=test)
+- dentist: 811건
+- doctor: 435건
+- nurse: 878건
+- pharm: 885건
+[eval] test 3009건 | 완료 32 건너뜀, 신규 2977건 (model=Qwen/Qwen3-8B, lora=./c1_adapters/qwen3-8b-c1-s43)
+[transformers] The following generation flags are not valid and may be ignored: ['top_k']. Set `TRANSFORMERS_VERBOSITY=info` for more details.

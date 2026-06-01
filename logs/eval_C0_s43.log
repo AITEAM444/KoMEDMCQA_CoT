@@ -1,0 +1,19 @@
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/399 [00:00<?, ?it/s]Loading weights:   1%|▏         | 5/399 [00:00<00:09, 40.68it/s]Loading weights:   7%|▋         | 28/399 [00:00<00:02, 135.87it/s]Loading weights:  12%|█▏        | 49/399 [00:00<00:02, 160.67it/s]Loading weights:  18%|█▊        | 70/399 [00:00<00:01, 175.14it/s]Loading weights:  22%|██▏       | 88/399 [00:00<00:01, 172.98it/s]Loading weights:  27%|██▋       | 106/399 [00:00<00:01, 168.99it/s]Loading weights:  32%|███▏      | 126/399 [00:00<00:01, 174.15it/s]Loading weights:  37%|███▋      | 147/399 [00:00<00:01, 180.00it/s]Loading weights:  42%|████▏     | 166/399 [00:00<00:01, 179.30it/s]Loading weights:  46%|████▌     | 184/399 [00:01<00:01, 172.97it/s]Loading weights:  51%|█████     | 203/399 [00:01<00:01, 174.78it/s]Loading weights:  56%|█████▌    | 224/399 [00:01<00:00, 179.18it/s]Loading weights:  61%|██████    | 242/399 [00:01<00:00, 175.07it/s]Loading weights:  65%|██████▌   | 260/399 [00:01<00:00, 172.17it/s]Loading weights: 100%|██████████| 399/399 [00:01<00:00, 246.59it/s]
+Some parameters are on the meta device because they were offloaded to the cpu.
+Traceback (most recent call last):
+  File "/workspace/KoMEDMCQA_CoT/src/eval/evaluate.py", line 162, in <module>
+    main()
+  File "/workspace/KoMEDMCQA_CoT/src/eval/evaluate.py", line 76, in main
+    model = PeftModel.from_pretrained(model, args.lora)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/peft/peft_model.py", line 568, in from_pretrained
+    load_result = model.load_adapter(
+                  ^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/peft/peft_model.py", line 1415, in load_adapter
+    max_memory = get_balanced_memory(
+                 ^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/accelerate/utils/modeling.py", line 1019, in get_balanced_memory
+    if set(no_split_children.keys()) == set(no_split_module_classes):
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: unhashable type: 'set'
