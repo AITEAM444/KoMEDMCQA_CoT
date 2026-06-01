@@ -344,5 +344,56 @@ python src/eval/compare_judges.py \
 | H2 (성능 향상) | C3 > C1, C3 > C-rand | 7~9 (`--mcnemar C3 C1`, `C3 C-rand`) |
 | H3 (judge로는 못 잡음) | C3 > C2 (같은 크기) | 4 → 7~9 (`--mcnemar C3 C2`) |
 
+## 사전 학습 어댑터 불러오기 (HuggingFace)
+
+학습된 LoRA 어댑터는 [AIteam4/KoMEDMCQA-LoRA](https://huggingface.co/AIteam4/KoMEDMCQA-LoRA) 에 업로드되어 있습니다.
+레포 구조: `qwen3-8b-<arm>-s<seed>/` (예: `qwen3-8b-c3-s42`)
+
+### 방법 1: 특정 어댑터 다운로드 후 평가 (권장)
+
+```powershell
+# 특정 arm·seed 어댑터만 내려받기
+hf download AIteam4/KoMEDMCQA-LoRA --repo-type model `
+  --include "qwen3-8b-c3-s42/*" --local-dir output
+
+# evaluate.py 로 평가 (기존 명령과 동일)
+python src/eval/evaluate.py --model Qwen/Qwen3-8B `
+  --lora output/qwen3-8b-c3-s42 `
+  --split test --output results/eval_C3_s42.jsonl
+```
+
+전체 어댑터(2 GB) 내려받기:
+```powershell
+hf download AIteam4/KoMEDMCQA-LoRA --repo-type model --local-dir output
+```
+
+### 방법 2: Python 코드에서 직접 로드
+
+```python
+from peft import PeftModel
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+base = AutoModelForCausalLM.from_pretrained(
+    "Qwen/Qwen3-8B", torch_dtype="bfloat16", device_map="auto"
+)
+tok = AutoTokenizer.from_pretrained("Qwen/Qwen3-8B")
+
+model = PeftModel.from_pretrained(
+    base,
+    "AIteam4/KoMEDMCQA-LoRA",
+    subfolder="qwen3-8b-c3-s42",   # arm·seed 폴더 지정
+)
+model.eval()
+```
+
+### arm·seed 목록
+
+| arm | seed | HuggingFace subfolder |
+|---|---|---|
+| C0 | 42/43/44 | `qwen3-8b-c0-s42` ~ `qwen3-8b-c0-s44` |
+| C1 | 42/43/44 | `qwen3-8b-c1-s42` ~ `qwen3-8b-c1-s44` |
+
+---
+
 ## 라이선스
 KorMedMCQA: cc-by-nc-2.0 → Non-Commercial 전파. 연구·교육 목적.
