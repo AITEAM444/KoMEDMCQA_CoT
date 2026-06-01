@@ -54,7 +54,7 @@ def main():
     ap.add_argument("--lora", default=None, help="LoRA adapter 경로 (있으면 base 위에 로드)")
     ap.add_argument("--split", default="test", choices=["train", "test", "dev"])
     ap.add_argument("--total", type=int, default=-1, help="-1 이면 split 전체")
-    ap.add_argument("--batch-size", type=int, default=16)
+    ap.add_argument("--batch-size", type=int, default=32)
     ap.add_argument("--max-new-tokens", type=int, default=2048)
     ap.add_argument("--enable-thinking", action="store_true",
                     help="Qwen3 thinking 모드 on (기본 off — Student 출력 스타일과 일치)")
