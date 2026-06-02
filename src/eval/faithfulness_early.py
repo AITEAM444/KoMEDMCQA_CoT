@@ -71,7 +71,9 @@ def main():
     ap.add_argument("--max-lora-rank", type=int, default=32)
     ap.add_argument("--gpu-mem", type=float, default=0.90)
     ap.add_argument("--enable-thinking", action="store_true")
-    ap.add_argument("--total", type=int, default=-1, help="-1 전체, 파일럿은 200 등")
+    ap.add_argument("--total", type=int, default=-1, help="-1 전체, 파일럿은 200 등 (앞에서 자름)")
+    ap.add_argument("--per-subject", type=int, default=0,
+                    help=">0 이면 과목별 N개씩 균형 샘플 (--total 보다 우선, 과목 쏠림 방지)")
     ap.add_argument("--output", default="results/faith_early.jsonl")
     args = ap.parse_args()
 
@@ -96,7 +98,17 @@ def main():
         key = (r["subset"], str(r["sample_idx"]))
         if key in by_key:
             recs.append((key, r))
-    if args.total > 0:
+    if args.per_subject > 0:
+        seen = defaultdict(int)
+        balanced = []
+        for key, r in recs:
+            sub = key[0]
+            if seen[sub] < args.per_subject:
+                balanced.append((key, r))
+                seen[sub] += 1
+        recs = balanced
+        print(f"[faith] 과목별 {args.per_subject}개 균형샘플: {dict(seen)}")
+    elif args.total > 0:
         recs = recs[:args.total]
     print(f"[faith] {args.results}: {len(recs)}문항, fracs={fracs}")
 
