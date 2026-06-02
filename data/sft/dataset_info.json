@@ -53,5 +53,27 @@
       "user_tag": "user",
       "assistant_tag": "assistant"
     }
+  },
+  "komed_crandl": {
+    "file_name": "train_C-randL.jsonl",
+    "formatting": "sharegpt",
+    "columns": { "messages": "messages" },
+    "tags": {
+      "role_tag": "role",
+      "content_tag": "content",
+      "user_tag": "user",
+      "assistant_tag": "assistant"
+    }
+  },
+  "komed_crands": {
+    "file_name": "train_C-randS.jsonl",
+    "formatting": "sharegpt",
+    "columns": { "messages": "messages" },
+    "tags": {
+      "role_tag": "role",
+      "content_tag": "content",
+      "user_tag": "user",
+      "assistant_tag": "assistant"
+    }
   }
 }
