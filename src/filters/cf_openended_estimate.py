@@ -126,8 +126,8 @@ def main():
     gaps = []
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as fo:
-        for r, w, oc, cc, cf in zip(rows, wrongs, orig_scores, cf_scores, cf_cots):
-            gap = oc - cf
+        for r, w, oc, cf_sc, cf_cot in zip(rows, wrongs, orig_scores, cf_scores, cf_cots):
+            gap = oc - cf_sc
             gaps.append(gap)
             safety = oc < args.min_orig_score
             gapcut = gap < args.gap_threshold
@@ -135,7 +135,8 @@ def main():
             n_drop += drop; n_safety += safety; n_gap += (gapcut and not safety)
             fo.write(json.dumps({
                 "question": r["Question"][:200], "gold": r["Response"][:150],
-                "wrong": w, "orig_score": oc, "cf_score": cf, "gap": gap,
+                "wrong": w, "orig_score": oc, "cf_score": cf_sc, "gap": gap,
+                "cf_cot": cf_cot[:400],
                 "drop": drop, "reason": "orig<min" if safety else ("gap<thr" if gapcut else ""),
             }, ensure_ascii=False) + "\n")
 
