@@ -52,11 +52,15 @@ def main():
     ap.add_argument("--lora", default=None, help="LoRA adapter 경로 (있으면 base 위에 로드)")
     ap.add_argument("--split", default="test", choices=["train", "test", "dev"])
     ap.add_argument("--total", type=int, default=-1, help="-1 이면 split 전체")
-    ap.add_argument("--max-new-tokens", type=int, default=4096)
-    ap.add_argument("--max-model-len", type=int, default=6144,
-                    help="프롬프트+생성 합(생성 4096 + 프롬프트 여유 2048)")
+    ap.add_argument("--max-new-tokens", type=int, default=2048)
+    ap.add_argument("--max-model-len", type=int, default=4096,
+                    help="프롬프트+생성 최대 길이. 값이 클수록 vLLM KV cache VRAM 사용량이 커짐.")
     ap.add_argument("--max-lora-rank", type=int, default=32, help="train.yaml lora_rank 와 일치")
-    ap.add_argument("--gpu-mem", type=float, default=0.90, help="vLLM gpu_memory_utilization")
+    ap.add_argument("--gpu-mem", type=float, default=0.82, help="vLLM gpu_memory_utilization")
+    ap.add_argument("--dtype", default="float16", choices=["auto", "float16", "bfloat16"],
+                    help="T4/V100 계열은 bfloat16 미지원이라 float16 이 안전함.")
+    ap.add_argument("--chunk", type=int, default=256,
+                    help="이 개수마다 vLLM generate 후 flush. engine init 이후 OOM도 줄이고 resume 안전성을 높임.")
     ap.add_argument("--enable-thinking", action="store_true",
                     help="Qwen3 thinking 모드 on (기본 off — evaluate.py 와 동일)")
     ap.add_argument("--overwrite", action="store_true",
@@ -71,7 +75,7 @@ def main():
 
     llm = LLM(
         model=args.model,
-        dtype="bfloat16",
+        dtype=args.dtype,
         trust_remote_code=True,
         max_model_len=args.max_model_len,
         gpu_memory_utilization=args.gpu_mem,
@@ -126,11 +130,12 @@ def main():
             fout.write(json.dumps(r, ensure_ascii=False) + "\n")
         fout.flush()
 
-        if pending:
-            prompts = [make_prompt(it["sample"]) for it in pending]
-            # vLLM 이 내부적으로 continuous batching — 한 번에 넘긴다.
+        for start in range(0, len(pending), args.chunk):
+            batch = pending[start:start + args.chunk]
+            prompts = [make_prompt(it["sample"]) for it in batch]
+            # chunk 안에서는 vLLM 이 continuous batching 으로 알아서 최대 동시 처리한다.
             outputs = llm.generate(prompts, sampling, lora_request=lora_req)
-            for it, out in zip(pending, outputs):
+            for it, out in zip(batch, outputs):
                 s = it["sample"]
                 text = out.outputs[0].text
                 gold = _LETTERS[int(s["answer"]) - 1]
@@ -141,6 +146,8 @@ def main():
                 aggregate(rec)
                 fout.write(json.dumps(rec, ensure_ascii=False) + "\n")
             fout.flush()
+            print(f"[eval-vllm] +{min(start + args.chunk, len(pending))}/{len(pending)} "
+                  f"(누적 {n_total}, 정답 {n_correct})", flush=True)
 
     n = n_total
     print("\n" + "=" * 56)

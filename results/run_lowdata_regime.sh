@@ -8,7 +8,11 @@ OUTPUT_ROOT=${OUTPUT_ROOT:-output/lowdata}
 RESULTS=${RESULTS:-results/lowdata}
 mkdir -p "$RESULTS"
 
-GPU_MEM=${GPU_MEM:-0.90}
+GPU_MEM=${GPU_MEM:-0.82}
+VLLM_DTYPE=${VLLM_DTYPE:-float16}
+MAX_MODEL_LEN=${MAX_MODEL_LEN:-4096}
+MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-2048}
+EVAL_CHUNK=${EVAL_CHUNK:-256}
 
 run_train_eval() {
     local arm_label="$1"
@@ -27,7 +31,16 @@ run_train_eval() {
     fi
 
     echo "[eval] $arm_label n=$n sample_seed=42 train_seed=$seed"
-    python src/eval/evaluate_vllm.py --gpu-mem "$GPU_MEM" --model "$MODEL" --lora "$output_dir" --split test --output "$result_file"
+    python src/eval/evaluate_vllm.py \
+        --model "$MODEL" \
+        --lora "$output_dir" \
+        --split test \
+        --output "$result_file" \
+        --gpu-mem "$GPU_MEM" \
+        --dtype "$VLLM_DTYPE" \
+        --max-model-len "$MAX_MODEL_LEN" \
+        --max-new-tokens "$MAX_NEW_TOKENS" \
+        --chunk "$EVAL_CHUNK"
 }
 
 for n in 300 500 1000; do
