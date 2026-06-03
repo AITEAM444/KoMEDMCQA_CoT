@@ -35,6 +35,9 @@ echo "[config] LOWDATA_NS=$LOWDATA_NS"
 echo "[config] LOWDATA_ARMS=$LOWDATA_ARMS"
 echo "[config] LOWDATA_SEEDS=$LOWDATA_SEEDS"
 echo "[config] EVAL_BACKEND=$EVAL_BACKEND EVAL_FALLBACK=$EVAL_FALLBACK"
+TOTAL_RUNS=$(( $(wc -w <<< "$LOWDATA_NS") * $(wc -w <<< "$LOWDATA_ARMS") * $(wc -w <<< "$LOWDATA_SEEDS") ))
+RUN_INDEX=0
+echo "[config] total train/eval runs=$TOTAL_RUNS"
 
 run_eval() {
     local output_dir="$1"
@@ -72,6 +75,8 @@ run_train_eval() {
     local arm_name="$2"
     local n="$3"
     local seed="$4"
+    local run_index="$5"
+    local total_runs="$6"
     local dataset="komed_low_${arm_name}_n${n}_r42"
     local output_dir="$OUTPUT_ROOT/qwen3-8b-low-${arm_name}-n${n}-r42-s${seed}"
     local result_file="$RESULTS/test_low_${arm_name}_n${n}_r42_s${seed}.jsonl"
@@ -84,12 +89,12 @@ run_train_eval() {
             echo "[retry train] incomplete output dir exists, removing: $output_dir"
             rm -rf "$output_dir"
         fi
-        echo "[train] $arm_label n=$n sample_seed=42 train_seed=$seed"
+        echo "[run $run_index/$total_runs] [train] $arm_label n=$n sample_seed=42 train_seed=$seed"
         llamafactory-cli train "$CONFIG" dataset="$dataset" dataset_dir="$DATASET_DIR" output_dir="$output_dir" seed="$seed" data_seed=42 $TRAIN_PRECISION_ARGS $TRAIN_SAVE_ARGS
     fi
 
     if [ "$RUN_EVAL" = "1" ]; then
-        echo "[eval] $arm_label n=$n sample_seed=42 train_seed=$seed"
+        echo "[run $run_index/$total_runs] [eval] $arm_label n=$n sample_seed=42 train_seed=$seed"
         run_eval "$output_dir" "$result_file"
     else
         echo "[skip eval] RUN_EVAL=0: $result_file"
@@ -101,7 +106,8 @@ for n in $LOWDATA_NS; do
         arm_label="${entry%%:*}"
         arm_name="${entry#*:}"
         for seed in $LOWDATA_SEEDS; do
-            run_train_eval "$arm_label" "$arm_name" "$n" "$seed"
+            RUN_INDEX=$((RUN_INDEX + 1))
+            run_train_eval "$arm_label" "$arm_name" "$n" "$seed" "$RUN_INDEX" "$TOTAL_RUNS"
         done
     done
 done
