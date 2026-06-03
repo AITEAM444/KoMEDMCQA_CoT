@@ -20,6 +20,8 @@ fi
 echo "[config] TRAIN_PRECISION_ARGS=$TRAIN_PRECISION_ARGS"
 echo "[config] TRAIN_SAVE_ARGS=$TRAIN_SAVE_ARGS"
 RUN_EVAL=${RUN_EVAL:-0}
+EVAL_BACKEND=${EVAL_BACKEND:-vllm}
+EVAL_FALLBACK=${EVAL_FALLBACK:-1}
 LOWDATA_NS=${LOWDATA_NS:-"300 500 1000"}
 LOWDATA_ARMS=${LOWDATA_ARMS:-"C3:c3 C2:c2 C-rand:crand"}
 LOWDATA_SEEDS=${LOWDATA_SEEDS:-"42 43 44"}
@@ -32,6 +34,38 @@ EVAL_CHUNK=${EVAL_CHUNK:-256}
 echo "[config] LOWDATA_NS=$LOWDATA_NS"
 echo "[config] LOWDATA_ARMS=$LOWDATA_ARMS"
 echo "[config] LOWDATA_SEEDS=$LOWDATA_SEEDS"
+echo "[config] EVAL_BACKEND=$EVAL_BACKEND EVAL_FALLBACK=$EVAL_FALLBACK"
+
+run_eval() {
+    local output_dir="$1"
+    local result_file="$2"
+
+    if [ "$EVAL_BACKEND" = "hf" ]; then
+        python src/eval/evaluate.py --model "$MODEL" --lora "$output_dir" --split test --output "$result_file"
+        return
+    fi
+
+    if python src/eval/evaluate_vllm.py \
+        --model "$MODEL" \
+        --lora "$output_dir" \
+        --split test \
+        --output "$result_file" \
+        --gpu-mem "$GPU_MEM" \
+        --dtype "$VLLM_DTYPE" \
+        --vllm-use-v1 "$VLLM_USE_V1" \
+        --max-model-len "$MAX_MODEL_LEN" \
+        --max-new-tokens "$MAX_NEW_TOKENS" \
+        --chunk "$EVAL_CHUNK"; then
+        return
+    fi
+
+    if [ "$EVAL_FALLBACK" = "1" ]; then
+        echo "[eval fallback] vLLM failed; running HF transformers evaluate.py for $result_file"
+        python src/eval/evaluate.py --model "$MODEL" --lora "$output_dir" --split test --output "$result_file"
+    else
+        return 1
+    fi
+}
 
 run_train_eval() {
     local arm_label="$1"
@@ -51,17 +85,7 @@ run_train_eval() {
 
     if [ "$RUN_EVAL" = "1" ]; then
         echo "[eval] $arm_label n=$n sample_seed=42 train_seed=$seed"
-        python src/eval/evaluate_vllm.py \
-            --model "$MODEL" \
-            --lora "$output_dir" \
-            --split test \
-            --output "$result_file" \
-            --gpu-mem "$GPU_MEM" \
-            --dtype "$VLLM_DTYPE" \
-            --vllm-use-v1 "$VLLM_USE_V1" \
-            --max-model-len "$MAX_MODEL_LEN" \
-            --max-new-tokens "$MAX_NEW_TOKENS" \
-            --chunk "$EVAL_CHUNK"
+        run_eval "$output_dir" "$result_file"
     else
         echo "[skip eval] RUN_EVAL=0: $result_file"
     fi
