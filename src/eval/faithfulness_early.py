@@ -69,7 +69,9 @@ def main():
     ap.add_argument("--answer-tokens", type=int, default=16, help="강제 답변 생성 토큰 수")
     ap.add_argument("--max-model-len", type=int, default=10240)
     ap.add_argument("--max-lora-rank", type=int, default=32)
-    ap.add_argument("--gpu-mem", type=float, default=0.90)
+    ap.add_argument("--gpu-mem", type=float, default=0.45)
+    ap.add_argument("--batch-size", type=int, default=64,
+                    help="vLLM generate에 한 번에 제출할 prompt 개수. OOM이면 32 또는 16으로 낮춤")
     ap.add_argument("--enable-thinking", action="store_true")
     ap.add_argument("--total", type=int, default=-1, help="-1 전체, 파일럿은 200 등 (앞에서 자름)")
     ap.add_argument("--per-subject", type=int, default=0,
@@ -146,7 +148,10 @@ def main():
             cut = int(round(f * len(rids)))
             Rf = tok.decode(rids[:cut]) if cut > 0 else ""
             prompts.append(base + Rf + "\n\n정답:")
-        outs = llm.generate(prompts, sampling, lora_request=lora_req)
+        outs = []
+        for start in range(0, len(prompts), args.batch_size):
+            batch = prompts[start:start + args.batch_size]
+            outs.extend(llm.generate(batch, sampling, lora_request=lora_req))
         n_corr = 0
         for (key, gold, _, _), o in zip(prepared, outs):
             pred = parse_first_letter(o.outputs[0].text)
