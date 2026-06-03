@@ -20,12 +20,18 @@ fi
 echo "[config] TRAIN_PRECISION_ARGS=$TRAIN_PRECISION_ARGS"
 echo "[config] TRAIN_SAVE_ARGS=$TRAIN_SAVE_ARGS"
 RUN_EVAL=${RUN_EVAL:-0}
+LOWDATA_NS=${LOWDATA_NS:-"300 500 1000"}
+LOWDATA_ARMS=${LOWDATA_ARMS:-"C3:c3 C2:c2 C-rand:crand"}
+LOWDATA_SEEDS=${LOWDATA_SEEDS:-"42 43 44"}
 GPU_MEM=${GPU_MEM:-0.82}
 VLLM_DTYPE=${VLLM_DTYPE:-float16}
 VLLM_USE_V1=${VLLM_USE_V1:-0}
 MAX_MODEL_LEN=${MAX_MODEL_LEN:-4096}
 MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-2048}
 EVAL_CHUNK=${EVAL_CHUNK:-256}
+echo "[config] LOWDATA_NS=$LOWDATA_NS"
+echo "[config] LOWDATA_ARMS=$LOWDATA_ARMS"
+echo "[config] LOWDATA_SEEDS=$LOWDATA_SEEDS"
 
 run_train_eval() {
     local arm_label="$1"
@@ -61,25 +67,26 @@ run_train_eval() {
     fi
 }
 
-for n in 300 500 1000; do
-    for entry in "C3:c3" "C2:c2" "C-rand:crand"; do
+for n in $LOWDATA_NS; do
+    for entry in $LOWDATA_ARMS; do
         arm_label="${entry%%:*}"
         arm_name="${entry#*:}"
-        for seed in 42 43 44; do
+        for seed in $LOWDATA_SEEDS; do
             run_train_eval "$arm_label" "$arm_name" "$n" "$seed"
         done
     done
 done
 
 if [ "$RUN_EVAL" = "1" ]; then
-    echo '[stats] n=300'
-    python src/eval/stats.py --arm C3 results/lowdata/test_low_c3_n300_r*_s*.jsonl --arm C-rand results/lowdata/test_low_crand_n300_r*_s*.jsonl --arm C2 results/lowdata/test_low_c2_n300_r*_s*.jsonl --mcnemar C3 C-rand --mcnemar C3 C2 --output results/lowdata/stats_low_n300.json
-
-    echo '[stats] n=500'
-    python src/eval/stats.py --arm C3 results/lowdata/test_low_c3_n500_r*_s*.jsonl --arm C-rand results/lowdata/test_low_crand_n500_r*_s*.jsonl --arm C2 results/lowdata/test_low_c2_n500_r*_s*.jsonl --mcnemar C3 C-rand --mcnemar C3 C2 --output results/lowdata/stats_low_n500.json
-
-    echo '[stats] n=1000'
-    python src/eval/stats.py --arm C3 results/lowdata/test_low_c3_n1000_r*_s*.jsonl --arm C-rand results/lowdata/test_low_crand_n1000_r*_s*.jsonl --arm C2 results/lowdata/test_low_c2_n1000_r*_s*.jsonl --mcnemar C3 C-rand --mcnemar C3 C2 --output results/lowdata/stats_low_n1000.json
+    for n in $LOWDATA_NS; do
+        echo "[stats] n=$n"
+        python src/eval/stats.py \
+            --arm C3 results/lowdata/test_low_c3_n${n}_r*_s*.jsonl \
+            --arm C-rand results/lowdata/test_low_crand_n${n}_r*_s*.jsonl \
+            --arm C2 results/lowdata/test_low_c2_n${n}_r*_s*.jsonl \
+            --mcnemar C3 C-rand --mcnemar C3 C2 \
+            --output results/lowdata/stats_low_n${n}.json
+    done
 else
     echo '[done] training only. Set RUN_EVAL=1 to run vLLM eval + stats later.'
 fi
