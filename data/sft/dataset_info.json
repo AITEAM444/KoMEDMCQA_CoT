@@ -2,7 +2,9 @@
   "komed_c0": {
     "file_name": "train_C0.jsonl",
     "formatting": "sharegpt",
-    "columns": { "messages": "messages" },
+    "columns": {
+      "messages": "messages"
+    },
     "tags": {
       "role_tag": "role",
       "content_tag": "content",
@@ -13,7 +15,9 @@
   "komed_c1": {
     "file_name": "train_C1.jsonl",
     "formatting": "sharegpt",
-    "columns": { "messages": "messages" },
+    "columns": {
+      "messages": "messages"
+    },
     "tags": {
       "role_tag": "role",
       "content_tag": "content",
@@ -24,7 +28,9 @@
   "komed_c2": {
     "file_name": "train_C2.jsonl",
     "formatting": "sharegpt",
-    "columns": { "messages": "messages" },
+    "columns": {
+      "messages": "messages"
+    },
     "tags": {
       "role_tag": "role",
       "content_tag": "content",
@@ -35,7 +41,9 @@
   "komed_c3": {
     "file_name": "train_C3.jsonl",
     "formatting": "sharegpt",
-    "columns": { "messages": "messages" },
+    "columns": {
+      "messages": "messages"
+    },
     "tags": {
       "role_tag": "role",
       "content_tag": "content",
@@ -46,7 +54,9 @@
   "komed_crand": {
     "file_name": "train_Crand.jsonl",
     "formatting": "sharegpt",
-    "columns": { "messages": "messages" },
+    "columns": {
+      "messages": "messages"
+    },
     "tags": {
       "role_tag": "role",
       "content_tag": "content",
@@ -57,7 +67,9 @@
   "komed_crandl": {
     "file_name": "train_C-randL.jsonl",
     "formatting": "sharegpt",
-    "columns": { "messages": "messages" },
+    "columns": {
+      "messages": "messages"
+    },
     "tags": {
       "role_tag": "role",
       "content_tag": "content",
@@ -68,7 +80,126 @@
   "komed_crands": {
     "file_name": "train_C-randS.jsonl",
     "formatting": "sharegpt",
-    "columns": { "messages": "messages" },
+    "columns": {
+      "messages": "messages"
+    },
+    "tags": {
+      "role_tag": "role",
+      "content_tag": "content",
+      "user_tag": "user",
+      "assistant_tag": "assistant"
+    }
+  },
+  "komed_low_c3_n300_r42": {
+    "file_name": "train_low_c3_n300_r42.jsonl",
+    "formatting": "sharegpt",
+    "columns": {
+      "messages": "messages"
+    },
+    "tags": {
+      "role_tag": "role",
+      "content_tag": "content",
+      "user_tag": "user",
+      "assistant_tag": "assistant"
+    }
+  },
+  "komed_low_c2_n300_r42": {
+    "file_name": "train_low_c2_n300_r42.jsonl",
+    "formatting": "sharegpt",
+    "columns": {
+      "messages": "messages"
+    },
+    "tags": {
+      "role_tag": "role",
+      "content_tag": "content",
+      "user_tag": "user",
+      "assistant_tag": "assistant"
+    }
+  },
+  "komed_low_c3_n500_r42": {
+    "file_name": "train_low_c3_n500_r42.jsonl",
+    "formatting": "sharegpt",
+    "columns": {
+      "messages": "messages"
+    },
+    "tags": {
+      "role_tag": "role",
+      "content_tag": "content",
+      "user_tag": "user",
+      "assistant_tag": "assistant"
+    }
+  },
+  "komed_low_c2_n500_r42": {
+    "file_name": "train_low_c2_n500_r42.jsonl",
+    "formatting": "sharegpt",
+    "columns": {
+      "messages": "messages"
+    },
+    "tags": {
+      "role_tag": "role",
+      "content_tag": "content",
+      "user_tag": "user",
+      "assistant_tag": "assistant"
+    }
+  },
+  "komed_low_c3_n1000_r42": {
+    "file_name": "train_low_c3_n1000_r42.jsonl",
+    "formatting": "sharegpt",
+    "columns": {
+      "messages": "messages"
+    },
+    "tags": {
+      "role_tag": "role",
+      "content_tag": "content",
+      "user_tag": "user",
+      "assistant_tag": "assistant"
+    }
+  },
+  "komed_low_c2_n1000_r42": {
+    "file_name": "train_low_c2_n1000_r42.jsonl",
+    "formatting": "sharegpt",
+    "columns": {
+      "messages": "messages"
+    },
+    "tags": {
+      "role_tag": "role",
+      "content_tag": "content",
+      "user_tag": "user",
+      "assistant_tag": "assistant"
+    }
+  },
+  "komed_low_crand_n300_r42": {
+    "file_name": "train_low_crand_n300_r42.jsonl",
+    "formatting": "sharegpt",
+    "columns": {
+      "messages": "messages"
+    },
+    "tags": {
+      "role_tag": "role",
+      "content_tag": "content",
+      "user_tag": "user",
+      "assistant_tag": "assistant"
+    }
+  },
+  "komed_low_crand_n500_r42": {
+    "file_name": "train_low_crand_n500_r42.jsonl",
+    "formatting": "sharegpt",
+    "columns": {
+      "messages": "messages"
+    },
+    "tags": {
+      "role_tag": "role",
+      "content_tag": "content",
+      "user_tag": "user",
+      "assistant_tag": "assistant"
+    }
+  },
+  "komed_low_crand_n1000_r42": {
+    "file_name": "train_low_crand_n1000_r42.jsonl",
+    "formatting": "sharegpt",
+    "columns": {
+      "messages": "messages"
+    },
     "tags": {
       "role_tag": "role",
       "content_tag": "content",
