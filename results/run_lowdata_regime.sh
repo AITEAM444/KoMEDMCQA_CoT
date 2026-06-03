@@ -9,6 +9,7 @@ RESULTS=${RESULTS:-results/lowdata}
 mkdir -p "$RESULTS"
 
 export DISABLE_VERSION_CHECK=${DISABLE_VERSION_CHECK:-1}
+TRAIN_SAVE_ARGS=${TRAIN_SAVE_ARGS:-"save_strategy=no save_only_model=true save_safetensors=true save_total_limit=1"}
 if [ -z "${TRAIN_PRECISION_ARGS:-}" ]; then
     if python -c "import torch; raise SystemExit(0 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 1)"; then
         TRAIN_PRECISION_ARGS="bf16=true fp16=false"
@@ -17,6 +18,7 @@ if [ -z "${TRAIN_PRECISION_ARGS:-}" ]; then
     fi
 fi
 echo "[config] TRAIN_PRECISION_ARGS=$TRAIN_PRECISION_ARGS"
+echo "[config] TRAIN_SAVE_ARGS=$TRAIN_SAVE_ARGS"
 RUN_EVAL=${RUN_EVAL:-0}
 GPU_MEM=${GPU_MEM:-0.82}
 VLLM_DTYPE=${VLLM_DTYPE:-float16}
@@ -38,7 +40,7 @@ run_train_eval() {
         echo "[skip train] 이미 학습 아웃풋 존재: $output_dir"
     else
         echo "[train] $arm_label n=$n sample_seed=42 train_seed=$seed"
-        llamafactory-cli train "$CONFIG" dataset="$dataset" dataset_dir="$DATASET_DIR" output_dir="$output_dir" seed="$seed" data_seed=42 $TRAIN_PRECISION_ARGS
+        llamafactory-cli train "$CONFIG" dataset="$dataset" dataset_dir="$DATASET_DIR" output_dir="$output_dir" seed="$seed" data_seed=42 $TRAIN_PRECISION_ARGS $TRAIN_SAVE_ARGS
     fi
 
     if [ "$RUN_EVAL" = "1" ]; then
