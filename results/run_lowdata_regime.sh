@@ -8,140 +8,37 @@ OUTPUT_ROOT=${OUTPUT_ROOT:-output/lowdata}
 RESULTS=${RESULTS:-results/lowdata}
 mkdir -p "$RESULTS"
 
-echo '[train] C3 n=300 sample_seed=42 train_seed=42'
-llamafactory-cli train "$CONFIG" dataset=komed_low_c3_n300_r42 dataset_dir="$DATASET_DIR" output_dir="$OUTPUT_ROOT/qwen3-8b-low-c3-n300-r42-s42" seed=42 data_seed=42
-echo '[eval] C3 n=300 sample_seed=42 train_seed=42'
-python src/eval/evaluate.py --model "$MODEL" --lora "$OUTPUT_ROOT/qwen3-8b-low-c3-n300-r42-s42" --split test --output "$RESULTS/test_low_c3_n300_r42_s42.jsonl"
+GPU_MEM=${GPU_MEM:-0.90}
 
-echo '[train] C3 n=300 sample_seed=42 train_seed=43'
-llamafactory-cli train "$CONFIG" dataset=komed_low_c3_n300_r42 dataset_dir="$DATASET_DIR" output_dir="$OUTPUT_ROOT/qwen3-8b-low-c3-n300-r42-s43" seed=43 data_seed=43
-echo '[eval] C3 n=300 sample_seed=42 train_seed=43'
-python src/eval/evaluate.py --model "$MODEL" --lora "$OUTPUT_ROOT/qwen3-8b-low-c3-n300-r42-s43" --split test --output "$RESULTS/test_low_c3_n300_r42_s43.jsonl"
+run_train_eval() {
+    local arm_label="$1"
+    local arm_name="$2"
+    local n="$3"
+    local seed="$4"
+    local dataset="komed_low_${arm_name}_n${n}_r42"
+    local output_dir="$OUTPUT_ROOT/qwen3-8b-low-${arm_name}-n${n}-r42-s${seed}"
+    local result_file="$RESULTS/test_low_${arm_name}_n${n}_r42_s${seed}.jsonl"
 
-echo '[train] C3 n=300 sample_seed=42 train_seed=44'
-llamafactory-cli train "$CONFIG" dataset=komed_low_c3_n300_r42 dataset_dir="$DATASET_DIR" output_dir="$OUTPUT_ROOT/qwen3-8b-low-c3-n300-r42-s44" seed=44 data_seed=44
-echo '[eval] C3 n=300 sample_seed=42 train_seed=44'
-python src/eval/evaluate.py --model "$MODEL" --lora "$OUTPUT_ROOT/qwen3-8b-low-c3-n300-r42-s44" --split test --output "$RESULTS/test_low_c3_n300_r42_s44.jsonl"
+    if [ -d "$output_dir" ] && [ "$(find "$output_dir" -maxdepth 1 -type f | wc -l)" -gt 0 ]; then
+        echo "[skip train] 이미 학습 아웃풋 존재: $output_dir"
+    else
+        echo "[train] $arm_label n=$n sample_seed=42 train_seed=$seed"
+        llamafactory-cli train "$CONFIG" dataset="$dataset" dataset_dir="$DATASET_DIR" output_dir="$output_dir" seed="$seed" data_seed=42
+    fi
 
-echo '[train] C2 n=300 sample_seed=42 train_seed=42'
-llamafactory-cli train "$CONFIG" dataset=komed_low_c2_n300_r42 dataset_dir="$DATASET_DIR" output_dir="$OUTPUT_ROOT/qwen3-8b-low-c2-n300-r42-s42" seed=42 data_seed=42
-echo '[eval] C2 n=300 sample_seed=42 train_seed=42'
-python src/eval/evaluate.py --model "$MODEL" --lora "$OUTPUT_ROOT/qwen3-8b-low-c2-n300-r42-s42" --split test --output "$RESULTS/test_low_c2_n300_r42_s42.jsonl"
+    echo "[eval] $arm_label n=$n sample_seed=42 train_seed=$seed"
+    python src/eval/evaluate_vllm.py --gpu-mem "$GPU_MEM" --model "$MODEL" --lora "$output_dir" --split test --output "$result_file"
+}
 
-echo '[train] C2 n=300 sample_seed=42 train_seed=43'
-llamafactory-cli train "$CONFIG" dataset=komed_low_c2_n300_r42 dataset_dir="$DATASET_DIR" output_dir="$OUTPUT_ROOT/qwen3-8b-low-c2-n300-r42-s43" seed=43 data_seed=43
-echo '[eval] C2 n=300 sample_seed=42 train_seed=43'
-python src/eval/evaluate.py --model "$MODEL" --lora "$OUTPUT_ROOT/qwen3-8b-low-c2-n300-r42-s43" --split test --output "$RESULTS/test_low_c2_n300_r42_s43.jsonl"
-
-echo '[train] C2 n=300 sample_seed=42 train_seed=44'
-llamafactory-cli train "$CONFIG" dataset=komed_low_c2_n300_r42 dataset_dir="$DATASET_DIR" output_dir="$OUTPUT_ROOT/qwen3-8b-low-c2-n300-r42-s44" seed=44 data_seed=44
-echo '[eval] C2 n=300 sample_seed=42 train_seed=44'
-python src/eval/evaluate.py --model "$MODEL" --lora "$OUTPUT_ROOT/qwen3-8b-low-c2-n300-r42-s44" --split test --output "$RESULTS/test_low_c2_n300_r42_s44.jsonl"
-
-echo '[train] C-rand n=300 sample_seed=42 train_seed=42'
-llamafactory-cli train "$CONFIG" dataset=komed_low_crand_n300_r42 dataset_dir="$DATASET_DIR" output_dir="$OUTPUT_ROOT/qwen3-8b-low-crand-n300-r42-s42" seed=42 data_seed=42
-echo '[eval] C-rand n=300 sample_seed=42 train_seed=42'
-python src/eval/evaluate.py --model "$MODEL" --lora "$OUTPUT_ROOT/qwen3-8b-low-crand-n300-r42-s42" --split test --output "$RESULTS/test_low_crand_n300_r42_s42.jsonl"
-
-echo '[train] C-rand n=300 sample_seed=42 train_seed=43'
-llamafactory-cli train "$CONFIG" dataset=komed_low_crand_n300_r42 dataset_dir="$DATASET_DIR" output_dir="$OUTPUT_ROOT/qwen3-8b-low-crand-n300-r42-s43" seed=43 data_seed=43
-echo '[eval] C-rand n=300 sample_seed=42 train_seed=43'
-python src/eval/evaluate.py --model "$MODEL" --lora "$OUTPUT_ROOT/qwen3-8b-low-crand-n300-r42-s43" --split test --output "$RESULTS/test_low_crand_n300_r42_s43.jsonl"
-
-echo '[train] C-rand n=300 sample_seed=42 train_seed=44'
-llamafactory-cli train "$CONFIG" dataset=komed_low_crand_n300_r42 dataset_dir="$DATASET_DIR" output_dir="$OUTPUT_ROOT/qwen3-8b-low-crand-n300-r42-s44" seed=44 data_seed=44
-echo '[eval] C-rand n=300 sample_seed=42 train_seed=44'
-python src/eval/evaluate.py --model "$MODEL" --lora "$OUTPUT_ROOT/qwen3-8b-low-crand-n300-r42-s44" --split test --output "$RESULTS/test_low_crand_n300_r42_s44.jsonl"
-
-echo '[train] C3 n=500 sample_seed=42 train_seed=42'
-llamafactory-cli train "$CONFIG" dataset=komed_low_c3_n500_r42 dataset_dir="$DATASET_DIR" output_dir="$OUTPUT_ROOT/qwen3-8b-low-c3-n500-r42-s42" seed=42 data_seed=42
-echo '[eval] C3 n=500 sample_seed=42 train_seed=42'
-python src/eval/evaluate.py --model "$MODEL" --lora "$OUTPUT_ROOT/qwen3-8b-low-c3-n500-r42-s42" --split test --output "$RESULTS/test_low_c3_n500_r42_s42.jsonl"
-
-echo '[train] C3 n=500 sample_seed=42 train_seed=43'
-llamafactory-cli train "$CONFIG" dataset=komed_low_c3_n500_r42 dataset_dir="$DATASET_DIR" output_dir="$OUTPUT_ROOT/qwen3-8b-low-c3-n500-r42-s43" seed=43 data_seed=43
-echo '[eval] C3 n=500 sample_seed=42 train_seed=43'
-python src/eval/evaluate.py --model "$MODEL" --lora "$OUTPUT_ROOT/qwen3-8b-low-c3-n500-r42-s43" --split test --output "$RESULTS/test_low_c3_n500_r42_s43.jsonl"
-
-echo '[train] C3 n=500 sample_seed=42 train_seed=44'
-llamafactory-cli train "$CONFIG" dataset=komed_low_c3_n500_r42 dataset_dir="$DATASET_DIR" output_dir="$OUTPUT_ROOT/qwen3-8b-low-c3-n500-r42-s44" seed=44 data_seed=44
-echo '[eval] C3 n=500 sample_seed=42 train_seed=44'
-python src/eval/evaluate.py --model "$MODEL" --lora "$OUTPUT_ROOT/qwen3-8b-low-c3-n500-r42-s44" --split test --output "$RESULTS/test_low_c3_n500_r42_s44.jsonl"
-
-echo '[train] C2 n=500 sample_seed=42 train_seed=42'
-llamafactory-cli train "$CONFIG" dataset=komed_low_c2_n500_r42 dataset_dir="$DATASET_DIR" output_dir="$OUTPUT_ROOT/qwen3-8b-low-c2-n500-r42-s42" seed=42 data_seed=42
-echo '[eval] C2 n=500 sample_seed=42 train_seed=42'
-python src/eval/evaluate.py --model "$MODEL" --lora "$OUTPUT_ROOT/qwen3-8b-low-c2-n500-r42-s42" --split test --output "$RESULTS/test_low_c2_n500_r42_s42.jsonl"
-
-echo '[train] C2 n=500 sample_seed=42 train_seed=43'
-llamafactory-cli train "$CONFIG" dataset=komed_low_c2_n500_r42 dataset_dir="$DATASET_DIR" output_dir="$OUTPUT_ROOT/qwen3-8b-low-c2-n500-r42-s43" seed=43 data_seed=43
-echo '[eval] C2 n=500 sample_seed=42 train_seed=43'
-python src/eval/evaluate.py --model "$MODEL" --lora "$OUTPUT_ROOT/qwen3-8b-low-c2-n500-r42-s43" --split test --output "$RESULTS/test_low_c2_n500_r42_s43.jsonl"
-
-echo '[train] C2 n=500 sample_seed=42 train_seed=44'
-llamafactory-cli train "$CONFIG" dataset=komed_low_c2_n500_r42 dataset_dir="$DATASET_DIR" output_dir="$OUTPUT_ROOT/qwen3-8b-low-c2-n500-r42-s44" seed=44 data_seed=44
-echo '[eval] C2 n=500 sample_seed=42 train_seed=44'
-python src/eval/evaluate.py --model "$MODEL" --lora "$OUTPUT_ROOT/qwen3-8b-low-c2-n500-r42-s44" --split test --output "$RESULTS/test_low_c2_n500_r42_s44.jsonl"
-
-echo '[train] C-rand n=500 sample_seed=42 train_seed=42'
-llamafactory-cli train "$CONFIG" dataset=komed_low_crand_n500_r42 dataset_dir="$DATASET_DIR" output_dir="$OUTPUT_ROOT/qwen3-8b-low-crand-n500-r42-s42" seed=42 data_seed=42
-echo '[eval] C-rand n=500 sample_seed=42 train_seed=42'
-python src/eval/evaluate.py --model "$MODEL" --lora "$OUTPUT_ROOT/qwen3-8b-low-crand-n500-r42-s42" --split test --output "$RESULTS/test_low_crand_n500_r42_s42.jsonl"
-
-echo '[train] C-rand n=500 sample_seed=42 train_seed=43'
-llamafactory-cli train "$CONFIG" dataset=komed_low_crand_n500_r42 dataset_dir="$DATASET_DIR" output_dir="$OUTPUT_ROOT/qwen3-8b-low-crand-n500-r42-s43" seed=43 data_seed=43
-echo '[eval] C-rand n=500 sample_seed=42 train_seed=43'
-python src/eval/evaluate.py --model "$MODEL" --lora "$OUTPUT_ROOT/qwen3-8b-low-crand-n500-r42-s43" --split test --output "$RESULTS/test_low_crand_n500_r42_s43.jsonl"
-
-echo '[train] C-rand n=500 sample_seed=42 train_seed=44'
-llamafactory-cli train "$CONFIG" dataset=komed_low_crand_n500_r42 dataset_dir="$DATASET_DIR" output_dir="$OUTPUT_ROOT/qwen3-8b-low-crand-n500-r42-s44" seed=44 data_seed=44
-echo '[eval] C-rand n=500 sample_seed=42 train_seed=44'
-python src/eval/evaluate.py --model "$MODEL" --lora "$OUTPUT_ROOT/qwen3-8b-low-crand-n500-r42-s44" --split test --output "$RESULTS/test_low_crand_n500_r42_s44.jsonl"
-
-echo '[train] C3 n=1000 sample_seed=42 train_seed=42'
-llamafactory-cli train "$CONFIG" dataset=komed_low_c3_n1000_r42 dataset_dir="$DATASET_DIR" output_dir="$OUTPUT_ROOT/qwen3-8b-low-c3-n1000-r42-s42" seed=42 data_seed=42
-echo '[eval] C3 n=1000 sample_seed=42 train_seed=42'
-python src/eval/evaluate.py --model "$MODEL" --lora "$OUTPUT_ROOT/qwen3-8b-low-c3-n1000-r42-s42" --split test --output "$RESULTS/test_low_c3_n1000_r42_s42.jsonl"
-
-echo '[train] C3 n=1000 sample_seed=42 train_seed=43'
-llamafactory-cli train "$CONFIG" dataset=komed_low_c3_n1000_r42 dataset_dir="$DATASET_DIR" output_dir="$OUTPUT_ROOT/qwen3-8b-low-c3-n1000-r42-s43" seed=43 data_seed=43
-echo '[eval] C3 n=1000 sample_seed=42 train_seed=43'
-python src/eval/evaluate.py --model "$MODEL" --lora "$OUTPUT_ROOT/qwen3-8b-low-c3-n1000-r42-s43" --split test --output "$RESULTS/test_low_c3_n1000_r42_s43.jsonl"
-
-echo '[train] C3 n=1000 sample_seed=42 train_seed=44'
-llamafactory-cli train "$CONFIG" dataset=komed_low_c3_n1000_r42 dataset_dir="$DATASET_DIR" output_dir="$OUTPUT_ROOT/qwen3-8b-low-c3-n1000-r42-s44" seed=44 data_seed=44
-echo '[eval] C3 n=1000 sample_seed=42 train_seed=44'
-python src/eval/evaluate.py --model "$MODEL" --lora "$OUTPUT_ROOT/qwen3-8b-low-c3-n1000-r42-s44" --split test --output "$RESULTS/test_low_c3_n1000_r42_s44.jsonl"
-
-echo '[train] C2 n=1000 sample_seed=42 train_seed=42'
-llamafactory-cli train "$CONFIG" dataset=komed_low_c2_n1000_r42 dataset_dir="$DATASET_DIR" output_dir="$OUTPUT_ROOT/qwen3-8b-low-c2-n1000-r42-s42" seed=42 data_seed=42
-echo '[eval] C2 n=1000 sample_seed=42 train_seed=42'
-python src/eval/evaluate.py --model "$MODEL" --lora "$OUTPUT_ROOT/qwen3-8b-low-c2-n1000-r42-s42" --split test --output "$RESULTS/test_low_c2_n1000_r42_s42.jsonl"
-
-echo '[train] C2 n=1000 sample_seed=42 train_seed=43'
-llamafactory-cli train "$CONFIG" dataset=komed_low_c2_n1000_r42 dataset_dir="$DATASET_DIR" output_dir="$OUTPUT_ROOT/qwen3-8b-low-c2-n1000-r42-s43" seed=43 data_seed=43
-echo '[eval] C2 n=1000 sample_seed=42 train_seed=43'
-python src/eval/evaluate.py --model "$MODEL" --lora "$OUTPUT_ROOT/qwen3-8b-low-c2-n1000-r42-s43" --split test --output "$RESULTS/test_low_c2_n1000_r42_s43.jsonl"
-
-echo '[train] C2 n=1000 sample_seed=42 train_seed=44'
-llamafactory-cli train "$CONFIG" dataset=komed_low_c2_n1000_r42 dataset_dir="$DATASET_DIR" output_dir="$OUTPUT_ROOT/qwen3-8b-low-c2-n1000-r42-s44" seed=44 data_seed=44
-echo '[eval] C2 n=1000 sample_seed=42 train_seed=44'
-python src/eval/evaluate.py --model "$MODEL" --lora "$OUTPUT_ROOT/qwen3-8b-low-c2-n1000-r42-s44" --split test --output "$RESULTS/test_low_c2_n1000_r42_s44.jsonl"
-
-echo '[train] C-rand n=1000 sample_seed=42 train_seed=42'
-llamafactory-cli train "$CONFIG" dataset=komed_low_crand_n1000_r42 dataset_dir="$DATASET_DIR" output_dir="$OUTPUT_ROOT/qwen3-8b-low-crand-n1000-r42-s42" seed=42 data_seed=42
-echo '[eval] C-rand n=1000 sample_seed=42 train_seed=42'
-python src/eval/evaluate.py --model "$MODEL" --lora "$OUTPUT_ROOT/qwen3-8b-low-crand-n1000-r42-s42" --split test --output "$RESULTS/test_low_crand_n1000_r42_s42.jsonl"
-
-echo '[train] C-rand n=1000 sample_seed=42 train_seed=43'
-llamafactory-cli train "$CONFIG" dataset=komed_low_crand_n1000_r42 dataset_dir="$DATASET_DIR" output_dir="$OUTPUT_ROOT/qwen3-8b-low-crand-n1000-r42-s43" seed=43 data_seed=43
-echo '[eval] C-rand n=1000 sample_seed=42 train_seed=43'
-python src/eval/evaluate.py --model "$MODEL" --lora "$OUTPUT_ROOT/qwen3-8b-low-crand-n1000-r42-s43" --split test --output "$RESULTS/test_low_crand_n1000_r42_s43.jsonl"
-
-echo '[train] C-rand n=1000 sample_seed=42 train_seed=44'
-llamafactory-cli train "$CONFIG" dataset=komed_low_crand_n1000_r42 dataset_dir="$DATASET_DIR" output_dir="$OUTPUT_ROOT/qwen3-8b-low-crand-n1000-r42-s44" seed=44 data_seed=44
-echo '[eval] C-rand n=1000 sample_seed=42 train_seed=44'
-python src/eval/evaluate.py --model "$MODEL" --lora "$OUTPUT_ROOT/qwen3-8b-low-crand-n1000-r42-s44" --split test --output "$RESULTS/test_low_crand_n1000_r42_s44.jsonl"
+for n in 300 500 1000; do
+    for entry in "C3:c3" "C2:c2" "C-rand:crand"; do
+        arm_label="${entry%%:*}"
+        arm_name="${entry#*:}"
+        for seed in 42 43 44; do
+            run_train_eval "$arm_label" "$arm_name" "$n" "$seed"
+        done
+    done
+done
 
 echo '[stats] n=300'
 python src/eval/stats.py --arm C3 results/lowdata/test_low_c3_n300_r*_s*.jsonl --arm C-rand results/lowdata/test_low_crand_n300_r*_s*.jsonl --arm C2 results/lowdata/test_low_c2_n300_r*_s*.jsonl --mcnemar C3 C-rand --mcnemar C3 C2 --output results/lowdata/stats_low_n300.json
