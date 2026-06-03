@@ -9,6 +9,7 @@ RESULTS=${RESULTS:-results/lowdata}
 mkdir -p "$RESULTS"
 
 export DISABLE_VERSION_CHECK=${DISABLE_VERSION_CHECK:-1}
+TRAIN_PRECISION_ARGS=${TRAIN_PRECISION_ARGS:-"bf16=false fp16=true"}
 RUN_EVAL=${RUN_EVAL:-0}
 GPU_MEM=${GPU_MEM:-0.82}
 VLLM_DTYPE=${VLLM_DTYPE:-float16}
@@ -30,7 +31,7 @@ run_train_eval() {
         echo "[skip train] 이미 학습 아웃풋 존재: $output_dir"
     else
         echo "[train] $arm_label n=$n sample_seed=42 train_seed=$seed"
-        llamafactory-cli train "$CONFIG" dataset="$dataset" dataset_dir="$DATASET_DIR" output_dir="$output_dir" seed="$seed" data_seed=42
+        llamafactory-cli train "$CONFIG" dataset="$dataset" dataset_dir="$DATASET_DIR" output_dir="$output_dir" seed="$seed" data_seed=42 $TRAIN_PRECISION_ARGS
     fi
 
     if [ "$RUN_EVAL" = "1" ]; then
