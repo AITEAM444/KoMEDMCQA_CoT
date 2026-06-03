@@ -59,6 +59,8 @@ def main():
     ap.add_argument("--gpu-mem", type=float, default=0.82, help="vLLM gpu_memory_utilization")
     ap.add_argument("--dtype", default="float16", choices=["auto", "float16", "bfloat16"],
                     help="T4/V100 계열은 bfloat16 미지원이라 float16 이 안전함.")
+    ap.add_argument("--vllm-use-v1", default="0", choices=["0", "1"],
+                    help="vLLM V1 EngineCore 초기화가 실패하면 0(V0 engine)이 더 안정적임.")
     ap.add_argument("--chunk", type=int, default=256,
                     help="이 개수마다 vLLM generate 후 flush. engine init 이후 OOM도 줄이고 resume 안전성을 높임.")
     ap.add_argument("--enable-thinking", action="store_true",
@@ -68,6 +70,7 @@ def main():
     ap.add_argument("--output", default="eval_results_vllm.jsonl")
     args = ap.parse_args()
 
+    os.environ.setdefault("VLLM_USE_V1", args.vllm_use_v1)
     from vllm import LLM, SamplingParams
     from vllm.lora.request import LoRARequest
 
