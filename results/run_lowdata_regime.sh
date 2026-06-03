@@ -9,7 +9,7 @@ RESULTS=${RESULTS:-results/lowdata}
 mkdir -p "$RESULTS"
 
 export DISABLE_VERSION_CHECK=${DISABLE_VERSION_CHECK:-1}
-TRAIN_SAVE_ARGS=${TRAIN_SAVE_ARGS:-"save_strategy=no save_only_model=true save_safetensors=true save_total_limit=1"}
+TRAIN_SAVE_ARGS=${TRAIN_SAVE_ARGS:-"save_strategy=\"no\" save_only_model=true save_safetensors=true save_total_limit=1"}
 if [ -z "${TRAIN_PRECISION_ARGS:-}" ]; then
     if python -c "import torch; raise SystemExit(0 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 1)"; then
         TRAIN_PRECISION_ARGS="bf16=true fp16=false"
