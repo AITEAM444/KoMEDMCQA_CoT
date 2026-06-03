@@ -9,7 +9,14 @@ RESULTS=${RESULTS:-results/lowdata}
 mkdir -p "$RESULTS"
 
 export DISABLE_VERSION_CHECK=${DISABLE_VERSION_CHECK:-1}
-TRAIN_PRECISION_ARGS=${TRAIN_PRECISION_ARGS:-"bf16=false fp16=true"}
+if [ -z "${TRAIN_PRECISION_ARGS:-}" ]; then
+    if python -c "import torch; raise SystemExit(0 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 1)"; then
+        TRAIN_PRECISION_ARGS="bf16=true fp16=false"
+    else
+        TRAIN_PRECISION_ARGS="bf16=false fp16=true"
+    fi
+fi
+echo "[config] TRAIN_PRECISION_ARGS=$TRAIN_PRECISION_ARGS"
 RUN_EVAL=${RUN_EVAL:-0}
 GPU_MEM=${GPU_MEM:-0.82}
 VLLM_DTYPE=${VLLM_DTYPE:-float16}
