@@ -75,10 +75,15 @@ run_train_eval() {
     local dataset="komed_low_${arm_name}_n${n}_r42"
     local output_dir="$OUTPUT_ROOT/qwen3-8b-low-${arm_name}-n${n}-r42-s${seed}"
     local result_file="$RESULTS/test_low_${arm_name}_n${n}_r42_s${seed}.jsonl"
+    local done_file="$output_dir/adapter_model.safetensors"
 
-    if [ -d "$output_dir" ] && [ "$(find "$output_dir" -maxdepth 1 -type f | wc -l)" -gt 0 ]; then
-        echo "[skip train] 이미 학습 아웃풋 존재: $output_dir"
+    if [ -f "$done_file" ]; then
+        echo "[skip train] completed adapter exists: $done_file"
     else
+        if [ -d "$output_dir" ]; then
+            echo "[retry train] incomplete output dir exists, removing: $output_dir"
+            rm -rf "$output_dir"
+        fi
         echo "[train] $arm_label n=$n sample_seed=42 train_seed=$seed"
         llamafactory-cli train "$CONFIG" dataset="$dataset" dataset_dir="$DATASET_DIR" output_dir="$output_dir" seed="$seed" data_seed=42 $TRAIN_PRECISION_ARGS $TRAIN_SAVE_ARGS
     fi
